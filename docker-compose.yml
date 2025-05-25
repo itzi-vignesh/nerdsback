@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    restart: always
+    env_file: .env.production
+    volumes:
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      - ./media:/app/media
+      - ./staticfiles:/app/staticfiles
+    depends_on:
+      - redis
+    networks:
+      - nerdslab_network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - nerdslab_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./staticfiles:/usr/share/nginx/static
+      - ./media:/usr/share/nginx/media
+    depends_on:
+      - web
+    networks:
+      - nerdslab_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  nerdslab_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

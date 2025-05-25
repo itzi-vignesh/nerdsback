@@ -1,0 +1,14 @@
+[Unit]
+Description=NerdsLab Backend API
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/nerdsback
+Environment="PATH=/var/www/nerdsback/venv/bin"
+ExecStart=/var/www/nerdsback/venv/bin/gunicorn nerdslab.wsgi:application --workers 3 --bind unix:/var/www/nerdsback/nerdsback.sock
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

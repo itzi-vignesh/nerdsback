@@ -1,0 +1,44 @@
+# Core Dependencies
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.0
+python-dotenv==1.0.0
+
+# Production Server
+gunicorn==21.2.0
+whitenoise==6.6.0
+
+# Database
+aiosqlite==0.19.0  # Async SQLite support
+django-db-geventpool==4.0.8  # Connection pooling
+retry==0.9.2  # For retrying failed DB operations
+
+# Security
+argon2-cffi==23.1.0  # For password hashing
+django-ratelimit==4.1.0  # For rate limiting
+bleach==6.1.0  # For sanitizing user input
+
+# File Handling
+Pillow==10.1.0  # For image processing
+django-storages==1.14.2  # For file storage
+django-filter==23.3  # For filtering querysets
+
+# HTTP and API
+requests==2.31.0  # For making HTTP requests
+uvicorn==0.27.0.post1  # ASGI server
+
+# System Monitoring
+psutil==5.9.8  # For system resource monitoring
+
+# Development Tools (Optional)
+waitress==2.1.2  # For Windows development
+
+# Monitoring and Logging
+sentry-sdk[django]==1.39.1  # For error tracking
+
+# Caching (Optional - for future use)
+redis==5.0.1
+django-redis==5.4.0
+
+# Database (Optional - for future PostgreSQL migration)
+psycopg2-binary==2.9.9
