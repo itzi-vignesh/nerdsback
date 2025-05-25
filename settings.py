@@ -34,7 +34,11 @@ BASE_API_URL = "/api/v1/"
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://learn.nerdslab.in')
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'https://learn.nerdslab.in,https://nerd-api.nerdslab.in,https://lab.nerdslab.in').split(',')
+CORS_ALLOWED_ORIGINS = [
+    "https://learn.nerdslab.in",
+    "https://nerd-api.nerdslab.in",
+    "https://lab.nerdslab.in"
+]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -55,8 +59,29 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
     'x-user-hash',
+    'x-content-type-options',
+    'x-frame-options',
+    'x-xss-protection',
+    'referrer-policy',
+    'content-security-policy',
+    'strict-transport-security',
+    'access-control-allow-origin',
+    'access-control-allow-methods',
+    'access-control-allow-headers',
+    'access-control-allow-credentials',
+    'access-control-max-age',
+    'access-control-expose-headers'
 ]
-CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
+CORS_EXPOSE_HEADERS = [
+    'Content-Type',
+    'X-CSRFToken',
+    'X-Content-Type-Options',
+    'X-Frame-Options',
+    'X-XSS-Protection',
+    'Referrer-Policy',
+    'Content-Security-Policy',
+    'Strict-Transport-Security'
+]
 CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 
 # Email settings
@@ -158,14 +183,26 @@ LOGGING = {
     'handlers': {
         'file': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
-            'filename': os.getenv('DJANGO_LOG_FILE', '/var/log/nerdslab/django.log'),
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': '/var/www/nerdsback/logs/django.log',
+            'maxBytes': 1024 * 1024 * 5,  # 5 MB
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
     },
     'loggers': {
         'django': {
-            'handlers': ['file'],
+            'handlers': ['file', 'console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+        'gunicorn': {
+            'handlers': ['file', 'console'],
             'level': 'INFO',
             'propagate': True,
         },

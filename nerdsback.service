@@ -7,8 +7,23 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/nerdsback
 Environment="PATH=/var/www/nerdsback/venv/bin"
-ExecStart=/var/www/nerdsback/venv/bin/gunicorn nerdslab.wsgi:application --workers 3 --bind unix:/var/www/nerdsback/nerdsback.sock
+Environment="DJANGO_SETTINGS_MODULE=nerdslab.settings"
+Environment="PYTHONPATH=/var/www/nerdsback"
+ExecStart=/var/www/nerdsback/venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/var/www/nerdsback/nerdsback.sock \
+    --access-logfile /var/www/nerdsback/logs/access.log \
+    --error-logfile /var/www/nerdsback/logs/error.log \
+    --log-level info \
+    nerdslab.wsgi:application
 Restart=always
+RestartSec=5
+
+# Ensure proper permissions
+UMask=0022
+ReadWriteDirectories=/var/www/nerdsback/logs
+ReadWriteDirectories=/var/www/nerdsback/media
+ReadWriteDirectories=/var/www/nerdsback/staticfiles
 
 [Install]
 WantedBy=multi-user.target
