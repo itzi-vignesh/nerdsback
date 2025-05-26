@@ -20,24 +20,14 @@ class CorsMiddleware:
             if origin:
                 response["Access-Control-Allow-Origin"] = origin
                 response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-                response["Access-Control-Allow-Headers"] = (
-                    "Accept, Accept-Encoding, Authorization, Content-Type, "
-                    "DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With, "
-                    "X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, "
-                    "Referrer-Policy, Content-Security-Policy, Strict-Transport-Security"
-                )
+                response["Access-Control-Allow-Headers"] = "accept, accept-encoding, authorization, content-type, dnt, origin, user-agent, x-csrftoken, x-requested-with"
                 response["Access-Control-Allow-Credentials"] = "true"
                 response["Access-Control-Max-Age"] = "86400"
         # In production mode, only allow specified origins
         elif origin in settings.CORS_ALLOWED_ORIGINS:
             response["Access-Control-Allow-Origin"] = origin
             response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-            response["Access-Control-Allow-Headers"] = (
-                "Accept, Accept-Encoding, Authorization, Content-Type, "
-                "DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With, "
-                "X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, "
-                "Referrer-Policy, Content-Security-Policy, Strict-Transport-Security"
-            )
+            response["Access-Control-Allow-Headers"] = "accept, accept-encoding, authorization, content-type, dnt, origin, user-agent, x-csrftoken, x-requested-with"
             response["Access-Control-Allow-Credentials"] = "true"
             response["Access-Control-Max-Age"] = "86400"
 
