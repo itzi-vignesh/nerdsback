@@ -118,9 +118,9 @@ class LoginView(APIView):
         response = HttpResponse()
         response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
         response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
+        response['Access-Control-Allow-Headers'] = 'Accept, Accept-Encoding, Authorization, Content-Type, DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With'
         response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
+        response['Access-Control-Max-Age'] = '86400'
         return response
 
     def post(self, request, *args, **kwargs):

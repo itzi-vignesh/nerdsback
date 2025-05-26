@@ -22,7 +22,9 @@ class CorsMiddleware:
                 response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
                 response["Access-Control-Allow-Headers"] = (
                     "Accept, Accept-Encoding, Authorization, Content-Type, "
-                    "DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With"
+                    "DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With, "
+                    "X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, "
+                    "Referrer-Policy, Content-Security-Policy, Strict-Transport-Security"
                 )
                 response["Access-Control-Allow-Credentials"] = "true"
                 response["Access-Control-Max-Age"] = "86400"
@@ -32,7 +34,9 @@ class CorsMiddleware:
             response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
             response["Access-Control-Allow-Headers"] = (
                 "Accept, Accept-Encoding, Authorization, Content-Type, "
-                "DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With"
+                "DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With, "
+                "X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, "
+                "Referrer-Policy, Content-Security-Policy, Strict-Transport-Security"
             )
             response["Access-Control-Allow-Credentials"] = "true"
             response["Access-Control-Max-Age"] = "86400"
@@ -51,6 +55,7 @@ class SecurityHeadersMiddleware:
         response["X-Frame-Options"] = "DENY"
         response["X-XSS-Protection"] = "1; mode=block"
         response["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         
         # Allow all connections in development mode
         if settings.DEBUG:
@@ -67,7 +72,7 @@ class SecurityHeadersMiddleware:
                 "img-src 'self' data: https:; "
                 "style-src 'self' 'unsafe-inline'; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-                "connect-src 'self' https://learn.nerdslab.in;"
+                "connect-src 'self' https://learn.nerdslab.in https://nerd-api.nerdslab.in https://lab.nerdslab.in;"
             )
         
         return response
