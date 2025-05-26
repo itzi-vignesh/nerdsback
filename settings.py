@@ -60,12 +60,8 @@ CORS_ALLOW_METHODS = [
     'OPTIONS',
 ]
 CORS_ALLOW_HEADERS = list(default_headers) + [
-    'x-content-type-options',
-    'x-frame-options',
-    'x-xss-protection',
-    'referrer-policy',
-    'content-security-policy',
-    'strict-transport-security',
+    'x-csrftoken',
+    'authorization',
 ]
 CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 
