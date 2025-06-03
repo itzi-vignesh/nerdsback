@@ -14,22 +14,9 @@ from django.views.decorators.http import require_http_methods
 from django.core.cache import cache
 from django_ratelimit.decorators import ratelimit
 
-def handle_options_request(request):
-    response = HttpResponse()
-    response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-    response['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-    response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization, X-User-Hash, X-CSRFToken'
-    response['Access-Control-Allow-Credentials'] = 'true'
-    response['Access-Control-Max-Age'] = '1728000'
-    response['Access-Control-Expose-Headers'] = 'Content-Type, X-CSRFToken'
-    return response
-
-@api_view(['POST', 'OPTIONS'])
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def verify_flag(request):
-    if request.method == 'OPTIONS':
-        return handle_options_request(request)
-        
     lab_id = request.data.get('lab_id')
     submitted_flag = request.data.get('flag')
 
@@ -107,11 +94,9 @@ def verify_flag(request):
             'error': 'Lab not found'
         }, status=status.HTTP_404_NOT_FOUND)
 
-@api_view(['GET', 'OPTIONS'])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_lab_status(request):
-    if request.method == 'OPTIONS':
-        return handle_options_request(request)
     user = request.user
     submissions = LabSubmission.objects.filter(user=user)
     
@@ -126,12 +111,9 @@ def get_lab_status(request):
     
     return Response(status_data)
 
-@api_view(['POST', 'OPTIONS'])
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def start_lab_session(request):
-    if request.method == 'OPTIONS':
-        return handle_options_request(request)
-        
     lab_id = request.data.get('lab_id')
     user_hash = request.data.get('user_hash')
 
@@ -179,12 +161,9 @@ def start_lab_session(request):
             'error': f'Failed to start lab session: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['POST', 'OPTIONS'])
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def stop_lab_session(request):
-    if request.method == 'OPTIONS':
-        return handle_options_request(request)
-        
     lab_id = request.data.get('lab_id')
     user_hash = request.data.get('user_hash')
 
@@ -232,11 +211,9 @@ def stop_lab_session(request):
             'error': f'Failed to stop lab session: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['GET', 'OPTIONS'])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_lab_details(request, lab_id):
-    if request.method == 'OPTIONS':
-        return handle_options_request(request)
     try:
         # Get lab details from LabFlag model
         lab = LabFlag.objects.get(lab_id=lab_id.replace('-lab', ''), is_active=True)
@@ -253,24 +230,21 @@ def get_lab_details(request, lab_id):
             lab_id=lab_id
         ).first()
         
-        # Map lab details to frontend expected format
-        lab_details = {
-            'id': lab.lab_id,
-            'title': lab.get_lab_id_display(),
-            'description': f"This is a {lab.get_lab_id_display()} lab. Your goal is to find and submit the correct flag. Look for clues in the application to determine the flag format.",
-            'difficulty': 'intermediate',  # Default difficulty
-            'category': 'Web Security',    # Default category
-            'estimated_minutes': 30,       # Default time
-            'points_awarded': 100,         # Default points
-            'lab_type': lab.lab_id,
-            'docker_image': f"nerdslab/{lab.lab_id}:latest",
-            'status': user_lab.status if user_lab else 'stopped',
-            'created_at': user_lab.created_at if user_lab else None,
-            'url': user_lab.lab_url if user_lab else None,
-            'is_completed': submission.is_correct if submission else False
-        }
+        return Response({
+            'lab_id': lab.lab_id,
+            'lab_name': lab.get_lab_id_display(),
+            'description': lab.description,
+            'submission': {
+                'submitted_flag': submission.submitted_flag if submission else None,
+                'is_correct': submission.is_correct if submission else False,
+                'submitted_at': submission.submitted_at if submission else None
+            } if submission else None,
+            'user_lab': {
+                'status': user_lab.status,
+                'completed_at': user_lab.completed_at
+            } if user_lab else None
+        })
         
-        return Response(lab_details)
     except LabFlag.DoesNotExist:
         return Response({
             'error': 'Lab not found'
@@ -278,59 +252,9 @@ def get_lab_details(request, lab_id):
 
 @require_http_methods(["GET"])
 def health_check(request):
-    """Health check endpoint for monitoring."""
-    try:
-        # Check disk usage
-        disk_usage = psutil.disk_usage('/')
-        if disk_usage.percent > settings.HEALTH_CHECK['DISK_USAGE_MAX']:
-            return JsonResponse({
-                'status': 'error',
-                'message': 'Disk usage too high',
-                'disk_usage': disk_usage.percent
-            }, status=500)
-
-        # Check memory usage
-        memory = psutil.virtual_memory()
-        if memory.available < settings.HEALTH_CHECK['MEMORY_MIN'] * 1024 * 1024:  # Convert MB to bytes
-            return JsonResponse({
-                'status': 'error',
-                'message': 'Memory usage too high',
-                'memory_available': memory.available
-            }, status=500)
-
-        # Check database connection
-        from django.db import connection
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-
-        # Check Redis connection
-        cache.set('health_check', 'ok', 1)
-        if cache.get('health_check') != 'ok':
-            return JsonResponse({
-                'status': 'error',
-                'message': 'Redis connection failed'
-            }, status=500)
-
-        return JsonResponse({
-            'status': 'healthy',
-            'disk_usage': disk_usage.percent,
-            'memory_available': memory.available,
-            'database': 'connected',
-            'redis': 'connected'
-        })
-
-    except Exception as e:
-        return JsonResponse({
-            'status': 'error',
-            'message': str(e)
-        }, status=500)
+    return JsonResponse({'status': 'healthy'})
 
 @ratelimit(key='ip', rate='100/h', block=True)
 @require_http_methods(["GET"])
 def ratelimit_view(request):
-    """View for rate limit exceeded."""
-    return JsonResponse({
-        'status': 'error',
-        'message': 'Rate limit exceeded. Please try again later.'
-    }, status=429) 
+    return JsonResponse({'status': 'ok'}) 
