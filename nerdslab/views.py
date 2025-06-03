@@ -1,7 +1,11 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 from .models import LabFlag, LabSubmission
 from accounts.models import UserLab, UserLabProgress
 from django.shortcuts import get_object_or_404
@@ -10,9 +14,96 @@ import requests
 from django.conf import settings
 import psutil
 from django.http import JsonResponse, HttpResponse
-from django.views.decorators.http import require_http_methods
 from django.core.cache import cache
 from django_ratelimit.decorators import ratelimit
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+@api_view(['POST', 'OPTIONS'])
+@permission_classes([AllowAny])
+def login_handler(request):
+    """
+    Custom login handler that bypasses Cloudflare caching.
+    This endpoint is specifically designed to handle CORS preflight
+    and authentication in a way that avoids Cloudflare's WAF restrictions.
+    """
+    if request.method == "OPTIONS":
+        response = HttpResponse()
+        origin = request.headers.get('Origin')
+        
+        if settings.DEBUG or origin in settings.CORS_ALLOWED_ORIGINS:
+            response['Access-Control-Allow-Origin'] = origin
+            response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            response['Access-Control-Allow-Headers'] = (
+                'Content-Type, Authorization, X-CSRFToken, X-Requested-With, '
+                'X-User-Hash, x-content-type-options, x-frame-options, x-xss-protection'
+            )
+            response['Access-Control-Allow-Credentials'] = 'true'
+            response['Access-Control-Max-Age'] = '86400'  # 24 hours
+            
+            # Add security headers
+            response['X-Content-Type-Options'] = 'nosniff'
+            response['X-Frame-Options'] = 'DENY'
+            response['X-XSS-Protection'] = '1; mode=block'
+            
+            response.status_code = 200
+        else:
+            response.status_code = 403
+            
+        return response
+
+    # Handle actual login request
+    username = request.data.get('username')
+    password = request.data.get('password')
+
+    if not username or not password:
+        return Response({
+            'error': 'Please provide both username and password'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    user = authenticate(username=username, password=password)
+
+    if user is None:
+        return Response({
+            'error': 'Invalid credentials'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not user.is_active:
+        return Response({
+            'error': 'User account is disabled'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Generate or get existing token
+    token, _ = Token.objects.get_or_create(user=user)
+
+    # Get user data
+    user_data = {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'is_staff': user.is_staff,
+        'is_superuser': user.is_superuser
+    }
+
+    response = Response({
+        'token': token.key,
+        'user': user_data
+    })
+
+    # Add CORS headers to the response
+    origin = request.headers.get('Origin')
+    if settings.DEBUG or origin in settings.CORS_ALLOWED_ORIGINS:
+        response['Access-Control-Allow-Origin'] = origin
+        response['Access-Control-Allow-Credentials'] = 'true'
+        
+        # Add security headers
+        response['X-Content-Type-Options'] = 'nosniff'
+        response['X-Frame-Options'] = 'DENY'
+        response['X-XSS-Protection'] = '1; mode=block'
+
+    return response
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
