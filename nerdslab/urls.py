@@ -24,6 +24,7 @@ urlpatterns = [
     path('health/', api_health_check, name='health-check'),
     path('test/', test_view, name='test_view'),
     path('api/v1/login-handler/', views.login_handler, name='login_handler'),
+    path('labs/templates/', views.get_lab_templates, name='lab_templates'),
     path('labs/verify-flag/', views.verify_flag, name='verify_flag'),
     path('labs/status/', views.get_lab_status, name='lab_status'),
     path('labs/start/', views.start_lab_session, name='start_lab_session'),
