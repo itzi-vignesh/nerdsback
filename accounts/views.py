@@ -17,6 +17,7 @@ from rest_framework import serializers
 from django.utils import timezone
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import render
+import traceback
 
 from .serializers import (
     UserSerializer,
@@ -140,11 +141,13 @@ class PasswordResetRequestView(APIView):
     
     def post(self, request):
         # Debug request information
-        print("Password reset request headers:", request.headers)
-        print("Password reset request path:", request.path)
+        logger.info("Password reset request received")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Request data: {request.data}")
         
         email = request.data.get('email')
         if not email:
+            logger.warning("Password reset request missing email")
             return Response(
                 {'error': 'Email is required'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -152,42 +155,42 @@ class PasswordResetRequestView(APIView):
             
         try:
             user = User.objects.get(email=email)
+            logger.info(f"Found user for password reset: {user.username}")
             
             # Create token
             token = PasswordResetToken.objects.create(user=user)
+            logger.info(f"Created password reset token for user {user.username}")
             
-            # Prepare email with template
-            reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token.token}"
-            context = {
-                'reset_url': reset_url,
-                'user': user,
-            }
-            
-            # Render HTML email template
-            html_content = render_to_string('emails/password_reset.html', context)
-            text_content = strip_tags(html_content)  # Generate plain text version
-            
-            # Create email
-            subject = 'Reset Your NerdsLab Password'
-            from_email = settings.DEFAULT_FROM_EMAIL
-            to = [email]
-            
-            msg = EmailMultiAlternatives(subject, text_content, from_email, to)
-            msg.attach_alternative(html_content, "text/html")
-            
-            # Send email
-            msg.send()
-            
-            return Response({'message': 'Password reset email sent'})
+            try:
+                # Send password reset email
+                send_password_reset_email(user, token)
+                logger.info(f"Password reset email sent to {email}")
+                
+                return Response({
+                    'message': 'Password reset email sent',
+                    'status': 'success'
+                })
+            except Exception as email_error:
+                logger.error(f"Failed to send password reset email: {str(email_error)}")
+                # Delete the token since email failed
+                token.delete()
+                return Response(
+                    {'error': 'Failed to send password reset email. Please try again later.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+                
         except User.DoesNotExist:
             # Don't reveal if email exists or not
-            return Response({'message': 'Password reset email sent if email exists'})
+            logger.info(f"Password reset requested for non-existent email: {email}")
+            return Response({
+                'message': 'If an account exists with this email, you will receive a password reset link.',
+                'status': 'success'
+            })
         except Exception as e:
-            import traceback
-            print(f"Error: {str(e)}")
-            print(traceback.format_exc())
+            logger.error(f"Unexpected error in password reset: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return Response(
-                {'error': str(e)},
+                {'error': 'An unexpected error occurred. Please try again later.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
