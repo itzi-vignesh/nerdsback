@@ -121,51 +121,45 @@ class LoginView(APIView):
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+@method_decorator(csrf_exempt, name='dispatch')
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
         """
-        Logout the user and blacklist their refresh token
+        Logout the user and blacklist their refresh token if provided
         """
         try:
             logger.info(f"Logout request received for user: {request.user.username}")
             
-            # Get refresh token from request data
+            # Get refresh token from request data if available
             refresh_token = request.data.get('refresh')
-            if not refresh_token:
-                logger.warning("Logout attempt without refresh token")
-                return Response({
-                    'status': 'error',
-                    'message': 'Refresh token is required'
-                }, status=400)
+            if refresh_token:
+                try:
+                    # Blacklist the refresh token
+                    token = RefreshToken(refresh_token)
+                    token.blacklist()
+                    logger.info(f"Successfully blacklisted refresh token for user: {request.user.username}")
+                    
+                    # Also invalidate the access token by blacklisting it
+                    access_token = request.auth
+                    if access_token:
+                        try:
+                            access_token.blacklist()
+                            logger.info(f"Successfully blacklisted access token for user: {request.user.username}")
+                        except Exception as e:
+                            logger.warning(f"Failed to blacklist access token: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Failed to blacklist refresh token: {str(e)}")
             
-            try:
-                # Blacklist the refresh token
-                token = RefreshToken(refresh_token)
-                token.blacklist()
-                logger.info(f"Successfully blacklisted refresh token for user: {request.user.username}")
-                
-                # Also invalidate the access token by blacklisting it
-                access_token = request.auth
-                if access_token:
-                    try:
-                        access_token.blacklist()
-                        logger.info(f"Successfully blacklisted access token for user: {request.user.username}")
-                    except Exception as e:
-                        logger.warning(f"Failed to blacklist access token: {str(e)}")
-                
-                return Response({
-                    'status': 'success',
-                    'message': 'Successfully logged out'
-                })
-                
-            except Exception as e:
-                logger.error(f"Error blacklisting token: {str(e)}")
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid refresh token'
-                }, status=400)
+            # Always perform session logout
+            logout(request)
+            logger.info(f"Successfully logged out user: {request.user.username}")
+            
+            return Response({
+                'status': 'success',
+                'message': 'Successfully logged out'
+            })
                 
         except Exception as e:
             logger.error(f"Unexpected error during logout: {str(e)}")
@@ -182,8 +176,10 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
 
+@method_decorator(csrf_exempt, name='dispatch')
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []  # No authentication required for password reset
     
     def post(self, request):
         try:
@@ -649,3 +645,36 @@ def csrf_failure(request, reason=""):
     
     # For HTML requests
     return render(request, 'accounts/csrf_error.html', {'reason': reason}, status=403)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GetCSRFTokenView(APIView):
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        """Get a new CSRF token."""
+        try:
+            # Get a new CSRF token
+            csrf_token = get_token(request)
+            
+            # Set the CSRF cookie
+            response = Response({
+                'status': 'success',
+                'message': 'CSRF token generated successfully'
+            })
+            response.set_cookie(
+                'csrftoken',
+                csrf_token,
+                samesite='Lax',
+                secure=settings.CSRF_COOKIE_SECURE,
+                httponly=False  # Must be accessible to JavaScript
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error generating CSRF token: {str(e)}")
+            return Response({
+                'status': 'error',
+                'message': 'Failed to generate CSRF token'
+            }, status=500)

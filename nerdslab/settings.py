@@ -137,6 +137,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     'https://learn.nerdslab.in',
+    'https://www.learn.nerdslab.in',
     'https://lab.nerdslab.in',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
@@ -144,6 +145,7 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'https://learn.nerdslab.in',
+    'https://www.learn.nerdslab.in',
     'https://lab.nerdslab.in',
 ]
 CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
@@ -161,17 +163,23 @@ CORS_ALLOW_HEADERS = [
     'x-user-hash',
 ]
 
+# CSRF settings
+CSRF_TRUSTED_ORIGINS = [
+    'https://learn.nerdslab.in',
+    'https://www.learn.nerdslab.in',
+    'https://lab.nerdslab.in',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+
 # Security settings
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-SECURE_BROWSER_XSS_FILTER = True
-SECURE_CONTENT_TYPE_NOSNIFF = True
-X_FRAME_OPTIONS = 'DENY'
-SECURE_HSTS_SECONDS = 31536000
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+CSRF_COOKIE_SAMESITE = 'Lax'  # Changed from 'Strict' to 'Lax' for better compatibility
+SESSION_COOKIE_SAMESITE = 'Lax'  # Changed from 'Strict' to 'Lax' for better compatibility
+CSRF_USE_SESSIONS = True
+CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read the CSRF cookie
 
 # REST Framework settings
 REST_FRAMEWORK = {
