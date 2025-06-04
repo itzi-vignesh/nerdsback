@@ -29,39 +29,11 @@ from .serializers import (
 from .models import UserProfile, PasswordResetToken, EmailVerificationToken
 from nerdslab.email_config import send_verification_email, send_password_reset_email
 
-def handle_options_request(request):
-    response = HttpResponse()
-    response['Access-Control-Allow-Origin'] = 'https://learn.nerdslab.in'
-    response['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-    response['Access-Control-Allow-Headers'] = 'accept,accept-encoding,authorization,content-type,dnt,origin,user-agent,x-csrftoken,x-requested-with,x-user-hash,x-content-type-options,x-frame-options,x-xss-protection,referrer-policy,content-security-policy,strict-transport-security'
-    response['Access-Control-Allow-Credentials'] = 'true'
-    response['Access-Control-Max-Age'] = '86400'
-    response['Access-Control-Expose-Headers'] = 'Content-Type,X-CSRFToken,X-Content-Type-Options,X-Frame-Options,X-XSS-Protection,Referrer-Policy,Content-Security-Policy,Strict-Transport-Security'
-    
-    # Security headers
-    response['X-Content-Type-Options'] = 'nosniff'
-    response['X-Frame-Options'] = 'DENY'
-    response['X-XSS-Protection'] = '1; mode=block'
-    response['Referrer-Policy'] = 'same-origin'
-    response['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://learn.nerdslab.in https://lab.nerdslab.in;"
-    response['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
-    
-    return response
-
 @method_decorator(csrf_exempt, name='dispatch')
 class RegisterView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
     serializer_class = RegisterSerializer
-    
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
     
     def post(self, request, *args, **kwargs):
         # Log registration attempt
@@ -114,15 +86,6 @@ class LoginView(APIView):
     authentication_classes = []
     serializer_class = LoginSerializer
     
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'Accept, Accept-Encoding, Authorization, Content-Type, DNT, Origin, User-Agent, X-CSRFToken, X-Requested-With'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '86400'
-        return response
-
     def post(self, request, *args, **kwargs):
         # Log login attempt headers for debugging
         print(f"Login request headers: {dict(request.headers)}")
@@ -149,15 +112,6 @@ class LoginView(APIView):
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
-    
     def post(self, request):
         # Delete token to logout
         try:
@@ -177,30 +131,12 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'GET, PUT, PATCH, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
-    
     def get_object(self):
         return self.request.user
 
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []  # No authentication required for password reset request
-    
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
     
     def post(self, request):
         # Debug request information
@@ -258,15 +194,6 @@ class PasswordResetRequestView(APIView):
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []  # No authentication required for password reset confirmation
-    
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
     
     def post(self, request):
         # Debug request information
@@ -370,15 +297,6 @@ class PasswordResetConfirmView(APIView):
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
-    
     def post(self, request):
         # Debug authentication info
         print("Auth header:", request.META.get('HTTP_AUTHORIZATION'))
@@ -452,15 +370,6 @@ class ChangePasswordView(APIView):
 class EmailVerificationView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
-    
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
     
     def post(self, request):
         serializer = EmailVerificationSerializer(data=request.data)
@@ -576,15 +485,6 @@ class EmailVerificationView(APIView):
 class ResendVerificationEmailView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []  # No authentication required for resending verification
-    
-    def options(self, request, *args, **kwargs):
-        response = HttpResponse()
-        response['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'X-Requested-With, Content-Type, Authorization'
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Max-Age'] = '1728000'
-        return response
     
     def post(self, request):
         email = request.data.get('email')

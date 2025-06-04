@@ -1,6 +1,7 @@
 from django.utils.deprecation import MiddlewareMixin
 import logging
 from django.http import HttpResponse
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -105,4 +106,21 @@ class CloudflareProxyMiddleware:
                     response['Access-Control-Allow-Headers'] = 'accept, accept-encoding, authorization, content-type, dnt, origin, user-agent, x-csrftoken, x-requested-with'
                     response['Access-Control-Max-Age'] = '86400'
                     
+        return response
+
+class SecurityHeadersMiddleware:
+    """
+    Middleware to add security headers to all responses
+    """
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.security_headers = getattr(settings, 'SECURITY_HEADERS', {})
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        
+        # Add security headers from settings
+        for header, value in self.security_headers.items():
+            response[header] = value
+            
         return response

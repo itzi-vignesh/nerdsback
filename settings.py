@@ -37,10 +37,11 @@ FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://learn.nerdslab.in')
 # CORS settings
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
-    "https://learn.nerdslab.in",
-    "https://nerd-api.nerdslab.in",
-    "https://lab.nerdslab.in",
+    'https://learn.nerdslab.in',
+    'https://nerd-api.nerdslab.in',
+    'https://lab.nerdslab.in'
 ]
+
 CORS_EXPOSE_HEADERS = [
     'Content-Type',
     'X-CSRFToken',
@@ -51,18 +52,35 @@ CORS_EXPOSE_HEADERS = [
     'Content-Security-Policy',
     'Strict-Transport-Security'
 ]
+
 CORS_ALLOW_METHODS = [
-    'GET',
-    'POST',
-    'PUT',
-    'PATCH',
     'DELETE',
+    'GET',
     'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT'
 ]
-CORS_ALLOW_HEADERS = list(default_headers) + [
-    'x-csrftoken',
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
     'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-user-hash',
+    'x-content-type-options',
+    'x-frame-options',
+    'x-xss-protection',
+    'referrer-policy',
+    'content-security-policy',
+    'strict-transport-security'
 ]
+
 CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 
 # Email settings
@@ -190,9 +208,9 @@ LOGGING = {
     },
 }
 
-# Add django-cors-headers middleware
+# Add django-cors-headers middleware at the top
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # Add this at the top
+    'corsheaders.middleware.CorsMiddleware',  # Must be at the top
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -200,25 +218,15 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'nerdslab.middleware.SecurityHeadersMiddleware',
 ]
 
-# Add security headers middleware
-class SecurityHeadersMiddleware:
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        response = self.get_response(request)
-        
-        # Security headers
-        response['X-Content-Type-Options'] = 'nosniff'
-        response['X-Frame-Options'] = 'DENY'
-        response['X-XSS-Protection'] = '1; mode=block'
-        response['Referrer-Policy'] = 'same-origin'
-        response['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://learn.nerdslab.in https://lab.nerdslab.in;"
-        response['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
-        
-        return response
-
-# Add the security headers middleware to the list
-MIDDLEWARE.append('nerdslab_backend.settings.SecurityHeadersMiddleware') 
+# Security headers middleware settings
+SECURITY_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
+    'Referrer-Policy': 'same-origin',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://learn.nerdslab.in https://lab.nerdslab.in;",
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload'
+} 

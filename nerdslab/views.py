@@ -18,64 +18,37 @@ from django.core.cache import cache
 from django_ratelimit.decorators import ratelimit
 
 @csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
-@api_view(['POST', 'OPTIONS'])
+@require_http_methods(["POST"])
+@api_view(['POST'])
 @permission_classes([AllowAny])
 def login_handler(request):
     """
-    Custom login handler that bypasses Cloudflare caching.
-    This endpoint is specifically designed to handle CORS preflight
-    and authentication in a way that avoids Cloudflare's WAF restrictions.
+    Custom login handler that supports both token and session authentication
     """
-    if request.method == "OPTIONS":
-        response = HttpResponse()
-        origin = request.headers.get('Origin')
-        
-        if settings.DEBUG or origin in settings.CORS_ALLOWED_ORIGINS:
-            response['Access-Control-Allow-Origin'] = origin
-            response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-            response['Access-Control-Allow-Headers'] = (
-                'Content-Type, Authorization, X-CSRFToken, X-Requested-With, '
-                'X-User-Hash, x-content-type-options, x-frame-options, x-xss-protection'
-            )
-            response['Access-Control-Allow-Credentials'] = 'true'
-            response['Access-Control-Max-Age'] = '86400'  # 24 hours
-            
-            # Add security headers
-            response['X-Content-Type-Options'] = 'nosniff'
-            response['X-Frame-Options'] = 'DENY'
-            response['X-XSS-Protection'] = '1; mode=block'
-            
-            response.status_code = 200
-        else:
-            response.status_code = 403
-            
-        return response
-
-    # Handle actual login request
     username = request.data.get('username')
     password = request.data.get('password')
-
+    
     if not username or not password:
         return Response({
-            'error': 'Please provide both username and password'
+            'error': 'Username and password are required'
         }, status=status.HTTP_400_BAD_REQUEST)
-
+    
+    # Authenticate user
     user = authenticate(username=username, password=password)
-
+    
     if user is None:
         return Response({
             'error': 'Invalid credentials'
         }, status=status.HTTP_401_UNAUTHORIZED)
-
+    
     if not user.is_active:
         return Response({
             'error': 'User account is disabled'
         }, status=status.HTTP_401_UNAUTHORIZED)
-
+    
     # Generate or get existing token
     token, _ = Token.objects.get_or_create(user=user)
-
+    
     # Get user data
     user_data = {
         'id': user.id,
@@ -86,24 +59,11 @@ def login_handler(request):
         'is_staff': user.is_staff,
         'is_superuser': user.is_superuser
     }
-
-    response = Response({
+    
+    return Response({
         'token': token.key,
         'user': user_data
     })
-
-    # Add CORS headers to the response
-    origin = request.headers.get('Origin')
-    if settings.DEBUG or origin in settings.CORS_ALLOWED_ORIGINS:
-        response['Access-Control-Allow-Origin'] = origin
-        response['Access-Control-Allow-Credentials'] = 'true'
-        
-        # Add security headers
-        response['X-Content-Type-Options'] = 'nosniff'
-        response['X-Frame-Options'] = 'DENY'
-        response['X-XSS-Protection'] = '1; mode=block'
-
-    return response
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
