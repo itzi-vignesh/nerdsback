@@ -18,6 +18,12 @@ from django.utils import timezone
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import render
 import traceback
+import logging
+from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from rest_framework.authtoken.models import RefreshToken
 
 from .serializers import (
     UserSerializer,
@@ -29,6 +35,9 @@ from .serializers import (
 )
 from .models import UserProfile, PasswordResetToken, EmailVerificationToken
 from nerdslab.email_config import send_verification_email, send_password_reset_email
+
+# Get logger
+logger = logging.getLogger(__name__)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class RegisterView(APIView):
@@ -86,7 +95,7 @@ class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
     serializer_class = LoginSerializer
-    
+
     def post(self, request, *args, **kwargs):
         # Log login attempt headers for debugging
         print(f"Login request headers: {dict(request.headers)}")
@@ -114,19 +123,46 @@ class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request):
-        # Delete token to logout
         try:
-            request.user.auth_token.delete()
-        except Exception:
-            pass
-        
-        # Logout from session
+            logger.info(f"Logout request received for user: {request.user.username}")
+            
+            # Get the refresh token from the request
+            refresh_token = request.data.get('refresh')
+            if not refresh_token:
+                logger.warning("Logout request missing refresh token")
+                return Response({
+                    'status': 'error',
+                    'message': 'Refresh token is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                # Blacklist the refresh token
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+                logger.info(f"Successfully blacklisted refresh token for user: {request.user.username}")
+                
+                # Logout the user
         logout(request)
         
-        return Response(
-            {"message": "Successfully logged out"}, 
-            status=status.HTTP_200_OK
-        )
+                return Response({
+                    'status': 'success',
+                    'message': 'Successfully logged out'
+                })
+            except Exception as token_error:
+                logger.error(f"Error blacklisting token: {str(token_error)}")
+                logger.error(traceback.format_exc())
+                return Response({
+                    'status': 'error',
+                    'message': 'Invalid refresh token'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            logger.error(f"Unexpected error during logout: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response({
+                'status': 'error',
+                'message': 'An unexpected error occurred during logout'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
@@ -137,62 +173,80 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
-    authentication_classes = []  # No authentication required for password reset request
     
     def post(self, request):
-        # Debug request information
-        logger.info("Password reset request received")
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Request data: {request.data}")
-        
-        email = request.data.get('email')
-        if not email:
-            logger.warning("Password reset request missing email")
-            return Response(
-                {'error': 'Email is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
         try:
-            user = User.objects.get(email=email)
-            logger.info(f"Found user for password reset: {user.username}")
+            logger.info("Password reset request received")
+            logger.debug(f"Request headers: {request.headers}")
+            logger.debug(f"Request data: {request.data}")
             
-            # Create token
-            token = PasswordResetToken.objects.create(user=user)
-            logger.info(f"Created password reset token for user {user.username}")
+            serializer = PasswordResetRequestSerializer(data=request.data)
+            if not serializer.is_valid():
+                logger.error(f"Invalid request data: {serializer.errors}")
+                return Response({
+                    'status': 'error',
+                    'message': 'Invalid request data',
+                    'errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            email = serializer.validated_data['email']
+            logger.info(f"Processing password reset for email: {email}")
             
             try:
-                # Send password reset email
-                send_password_reset_email(user, token)
-                logger.info(f"Password reset email sent to {email}")
-                
+                user = get_user_model().objects.get(email=email)
+                logger.info(f"User found for email: {email}")
+            except get_user_model().DoesNotExist:
+                logger.info(f"No user found for email: {email}")
+                # Don't reveal that the email doesn't exist
                 return Response({
-                    'message': 'Password reset email sent',
-                    'status': 'success'
+                    'status': 'success',
+                    'message': 'If an account exists with this email, you will receive a password reset link.'
                 })
-            except Exception as email_error:
-                logger.error(f"Failed to send password reset email: {str(email_error)}")
-                # Delete the token since email failed
-                token.delete()
-                return Response(
-                    {'error': 'Failed to send password reset email. Please try again later.'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            
+            # Create password reset token
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            
+            # Save token to database
+            PasswordResetToken.objects.create(
+                user=user,
+                token=token,
+                uid=uid
+            )
+            
+            # Send password reset email
+            reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}"
+            try:
+                send_mail(
+                    'Password Reset Request',
+                    f'Click the following link to reset your password: {reset_url}',
+                    settings.DEFAULT_FROM_EMAIL,
+                    [email],
+                    fail_silently=False,
                 )
-                
-        except User.DoesNotExist:
-            # Don't reveal if email exists or not
-            logger.info(f"Password reset requested for non-existent email: {email}")
+                logger.info(f"Password reset email sent to: {email}")
+            except Exception as e:
+                logger.error(f"Failed to send password reset email: {str(e)}")
+                logger.error(traceback.format_exc())
+                # Delete the token if email sending fails
+                PasswordResetToken.objects.filter(user=user).delete()
+                return Response({
+                    'status': 'error',
+                    'message': 'Failed to send password reset email. Please try again later.'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
             return Response({
-                'message': 'If an account exists with this email, you will receive a password reset link.',
-                'status': 'success'
+                'status': 'success',
+                'message': 'If an account exists with this email, you will receive a password reset link.'
             })
+            
         except Exception as e:
             logger.error(f"Unexpected error in password reset: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return Response(
-                {'error': 'An unexpected error occurred. Please try again later.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            logger.error(traceback.format_exc())
+            return Response({
+                'status': 'error',
+                'message': 'An unexpected error occurred. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
