@@ -42,45 +42,33 @@ CORS_ALLOWED_ORIGINS = [
     'https://lab.nerdslab.in'
 ]
 
+# Use default headers and add our custom header
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-user-hash'
+]
+
+# Expose security headers in responses
 CORS_EXPOSE_HEADERS = [
     'Content-Type',
     'X-CSRFToken',
+    'Content-Security-Policy',
     'X-Content-Type-Options',
     'X-Frame-Options',
     'X-XSS-Protection',
-    'Referrer-Policy',
-    'Content-Security-Policy',
     'Strict-Transport-Security'
 ]
 
+# CORS methods
 CORS_ALLOW_METHODS = [
     'DELETE',
     'GET',
     'OPTIONS',
     'PATCH',
     'POST',
-    'PUT'
+    'PUT',
 ]
 
-CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
-    'x-user-hash',
-    'x-content-type-options',
-    'x-frame-options',
-    'x-xss-protection',
-    'referrer-policy',
-    'content-security-policy',
-    'strict-transport-security'
-]
-
+# CORS preflight max age
 CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 
 # Email settings
@@ -210,7 +198,7 @@ LOGGING = {
 
 # Add django-cors-headers middleware at the top
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # Must be at the top
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -221,12 +209,11 @@ MIDDLEWARE = [
     'nerdslab.middleware.SecurityHeadersMiddleware',
 ]
 
-# Security headers middleware settings
+# Security headers configuration
 SECURITY_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
-    'Referrer-Policy': 'same-origin',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://learn.nerdslab.in https://lab.nerdslab.in;",
-    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload'
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.nerdslab.in; frame-src 'self' https://*.nerdslab.in;"
 } 

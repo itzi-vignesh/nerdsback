@@ -8,7 +8,6 @@ from django.http import HttpResponse
 from django.conf import settings
 from django.conf.urls.static import static
 from . import views
-from . import cors_views
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -24,7 +23,6 @@ urlpatterns = [
     path('accounts/', include('accounts.urls')),
     path('health/', api_health_check, name='health-check'),
     path('test/', test_view, name='test_view'),
-    path('cors-preflight/', cors_views.cors_preflight, name='cors_preflight'),
     path('api/v1/login-handler/', views.login_handler, name='login_handler'),
     path('labs/verify-flag/', views.verify_flag, name='verify_flag'),
     path('labs/status/', views.get_lab_status, name='lab_status'),
