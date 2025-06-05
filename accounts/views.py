@@ -25,7 +25,12 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from datetime import timedelta
+import time
+from smtplib import SMTPException, SMTPAuthenticationError, SMTPConnectError
+from socket import timeout as SocketTimeout
+from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 
 from .serializers import (
     UserSerializer,
@@ -124,6 +129,7 @@ class LoginView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
     
     def post(self, request):
         """
@@ -131,6 +137,8 @@ class LogoutView(APIView):
         """
         try:
             logger.info(f"Logout request received for user: {request.user.username}")
+            logger.debug(f"Request headers: {request.headers}")
+            logger.debug(f"Request auth: {request.auth}")
             
             # Get refresh token from request data if available
             refresh_token = request.data.get('refresh')
@@ -154,6 +162,14 @@ class LogoutView(APIView):
             
             # Always perform session logout
             logout(request)
+            
+            # Delete the auth token if it exists
+            try:
+                Token.objects.filter(user=request.user).delete()
+                logger.info(f"Successfully deleted auth token for user: {request.user.username}")
+            except Exception as e:
+                logger.warning(f"Failed to delete auth token: {str(e)}")
+            
             logger.info(f"Successfully logged out user: {request.user.username}")
             
             return Response({
@@ -178,83 +194,135 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class PasswordResetRequestView(APIView):
-    permission_classes = [permissions.AllowAny]
-    authentication_classes = []  # No authentication required for password reset
+    permission_classes = [AllowAny]
     
+    @method_decorator(csrf_exempt, name='dispatch')
     def post(self, request):
-        try:
-            logger.info("Password reset request received")
-            logger.debug(f"Request headers: {request.headers}")
-            logger.debug(f"Request data: {request.data}")
+        logger.info("Password reset request received")
+        logger.debug(f"Request headers: {request.headers}")
+        logger.debug(f"Request data: {request.data}")
         
-            serializer = PasswordResetRequestSerializer(data=request.data)
-            if not serializer.is_valid():
-                logger.error(f"Invalid request data: {serializer.errors}")
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid request data',
-                    'errors': serializer.errors
-                }, status=status.HTTP_400_BAD_REQUEST)
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        
+        if not serializer.is_valid():
+            logger.warning(f"Invalid password reset request data: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             
-            email = serializer.validated_data['email']
-            logger.info(f"Processing password reset for email: {email}")
+        email = serializer.validated_data['email']
+        try:
+            user = User.objects.get(email=email)
+            logger.info(f"User found for password reset: {user.email}")
             
-            try:
-                user = get_user_model().objects.get(email=email)
-                logger.info(f"User found for email: {email}")
-                
-                # Create password reset token
-                token = default_token_generator.make_token(user)
-                uid = urlsafe_base64_encode(force_bytes(user.pk))
-                
-                # Save token to database
-                PasswordResetToken.objects.create(
-                    user=user,
-                    token=token,
-                    uid=uid
-                )
-                
-                # Send password reset email
-                reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}"
+            # Create password reset token
+            token = PasswordResetToken.objects.create(
+                user=user,
+                expires_at=timezone.now() + timedelta(hours=24)
+            )
+            
+            # Generate reset URL
+            reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token.token}"
+            
+            # Prepare email context
+            context = {
+                'user': user,
+                'reset_url': reset_url,
+                'expiry_hours': 24,
+                'now': timezone.now()
+            }
+            
+            # Render email content
+            html_content = render_to_string('emails/password_reset.html', context)
+            text_content = f"""
+            Hello {user.first_name},
+            
+            We received a request to reset your password for your NerdsLab account.
+            If you didn't make this request, you can safely ignore this email.
+            
+            To reset your password, visit this link:
+            {reset_url}
+            
+            This password reset link will expire in 24 hours.
+            
+            If you have any questions or need assistance, please contact our support team.
+            
+            This is an automated message, please do not reply to this email.
+            """
+            
+            # Send email with retry mechanism
+            max_retries = 3
+            retry_count = 0
+            last_error = None
+            
+            while retry_count < max_retries:
                 try:
-                    send_mail(
-                        'Password Reset Request',
-                        f'Click the following link to reset your password: {reset_url}',
-                        settings.DEFAULT_FROM_EMAIL,
-                        [email],
-                        fail_silently=False,
+                    logger.info(f"Attempting to send password reset email (attempt {retry_count + 1}/{max_retries})")
+                    logger.debug(f"Using SMTP settings: {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
+                    
+                    email = EmailMultiAlternatives(
+                        subject='Reset Your NerdsLab Password',
+                        body=text_content,
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        to=[user.email]
                     )
-                    logger.info(f"Password reset email sent to: {email}")
+                    email.attach_alternative(html_content, "text/html")
+                    email.send()
+                    
+                    logger.info(f"Password reset email sent successfully to {user.email}")
+                    break
+                except SMTPAuthenticationError as e:
+                    last_error = e
+                    logger.error(f"SMTP Authentication failed: {str(e)}")
+                    break  # Don't retry on auth failure
+                except SMTPConnectError as e:
+                    last_error = e
+                    logger.error(f"SMTP Connection failed: {str(e)}")
+                    retry_count += 1
+                except SMTPException as e:
+                    last_error = e
+                    logger.error(f"SMTP error occurred: {str(e)}")
+                    retry_count += 1
+                except SocketTimeout as e:
+                    last_error = e
+                    logger.error(f"SMTP connection timed out: {str(e)}")
+                    retry_count += 1
                 except Exception as e:
-                    logger.error(f"Failed to send password reset email: {str(e)}")
+                    last_error = e
+                    logger.error(f"Unexpected error sending email: {str(e)}")
                     logger.error(traceback.format_exc())
-                    # Delete the token if email sending fails
-                    PasswordResetToken.objects.filter(user=user).delete()
-                    return Response({
-                        'status': 'error',
-                        'message': 'Failed to send password reset email. Please try again later.'
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    retry_count += 1
                 
-                return Response({
-                    'status': 'success',
-                    'message': 'If an account exists with this email, you will receive a password reset link.'
-                })
-                
-            except get_user_model().DoesNotExist:
-                logger.info(f"No user found for email: {email}")
-                # Don't reveal that the email doesn't exist
-                return Response({
-                    'status': 'success',
-                    'message': 'If an account exists with this email, you will receive a password reset link.'
-                })
-                
+                if retry_count < max_retries:
+                    logger.info(f"Waiting {settings.SMTP_RETRY_DELAY} seconds before retry...")
+                    time.sleep(settings.SMTP_RETRY_DELAY)
+            
+            if retry_count == max_retries:
+                # Delete the token if email sending fails after all retries
+                token.delete()
+                logger.error(f"All attempts to send password reset email failed. Last error: {str(last_error)}")
+                return Response(
+                    {"detail": "Failed to send password reset email. Please try again later."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            return Response(
+                {"detail": "If an account exists with this email, you will receive a password reset link."},
+                status=status.HTTP_200_OK
+            )
+            
+        except User.DoesNotExist:
+            logger.info(f"No user found for password reset request: {email}")
+            # Return success even if user doesn't exist to prevent email enumeration
+            return Response(
+                {"detail": "If an account exists with this email, you will receive a password reset link."},
+                status=status.HTTP_200_OK
+            )
         except Exception as e:
-            logger.error(f"Unexpected error in password reset: {str(e)}")
+            logger.error(f"Error processing password reset request: {str(e)}")
             logger.error(traceback.format_exc())
-            return Response({
-                'status': 'error',
-                'message': 'An unexpected error occurred. Please try again later.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"detail": "An error occurred while processing your request. Please try again later."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
