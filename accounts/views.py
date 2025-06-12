@@ -161,8 +161,8 @@ class LogoutView(APIView):
                     logger.warning(f"Failed to blacklist refresh token: {str(e)}")
             
             # Always perform session logout
-        logout(request)
-        
+            logout(request)
+            
             # Delete the auth token if it exists
             try:
                 Token.objects.filter(user=request.user).delete()
