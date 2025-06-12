@@ -116,7 +116,7 @@ def verify_flag(request):
         )
     
     # TODO: Implement actual flag verification
-        return Response({
+    return Response({
         'status': 'success',
         'message': 'Flag verified successfully',
         'is_correct': True
@@ -155,7 +155,7 @@ def start_lab_session(request):
         )
     
     # TODO: Implement actual lab session creation
-            return Response({
+    return Response({
         'status': 'success',
         'message': 'Lab session started',
         'url': f'https://lab-{lab_id}.nerdslab.in'
@@ -177,7 +177,7 @@ def stop_lab_session(request):
         )
     
     # TODO: Implement actual lab session termination
-            return Response({
+    return Response({
         'status': 'success',
         'message': 'Lab session stopped'
     })

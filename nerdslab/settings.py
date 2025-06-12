@@ -19,6 +19,15 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'your-secret-key-here')
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = ['nerd-api.nerdslab.in', 'localhost', '127.0.0.1']
 
+# Lab environment secret key for token generation/verification
+LAB_SECRET_KEY = os.environ.get('LAB_SECRET_KEY')
+if not LAB_SECRET_KEY:
+    raise ValueError("LAB_SECRET_KEY environment variable is required")
+
+# Token settings
+LAB_TOKEN_EXPIRY = int(os.environ.get('LAB_TOKEN_EXPIRY', '3600'))  # 1 hour in seconds
+LAB_TOKEN_ALGORITHM = 'HS256'
+
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
