@@ -17,6 +17,10 @@ from django.http import JsonResponse, HttpResponse
 from django.core.cache import cache
 from django_ratelimit.decorators import ratelimit
 import json
+from .utils import generate_lab_token, verify_lab_token, extract_user_info
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Lab templates data
 LAB_TEMPLATES = [
@@ -112,7 +116,7 @@ def verify_flag(request):
         )
     
     # TODO: Implement actual flag verification
-    return Response({
+        return Response({
         'status': 'success',
         'message': 'Flag verified successfully',
         'is_correct': True
@@ -143,7 +147,7 @@ def start_lab_session(request):
     """
     lab_id = request.data.get('lab_id')
     user_hash = request.data.get('user_hash')
-    
+
     if not lab_id or not user_hash:
         return Response(
             {'error': 'Lab ID and user hash are required'},
@@ -151,7 +155,7 @@ def start_lab_session(request):
         )
     
     # TODO: Implement actual lab session creation
-    return Response({
+            return Response({
         'status': 'success',
         'message': 'Lab session started',
         'url': f'https://lab-{lab_id}.nerdslab.in'
@@ -165,7 +169,7 @@ def stop_lab_session(request):
     """
     lab_id = request.data.get('lab_id')
     user_hash = request.data.get('user_hash')
-    
+
     if not lab_id or not user_hash:
         return Response(
             {'error': 'Lab ID and user hash are required'},
@@ -173,7 +177,7 @@ def stop_lab_session(request):
         )
     
     # TODO: Implement actual lab session termination
-    return Response({
+            return Response({
         'status': 'success',
         'message': 'Lab session stopped'
     })
@@ -202,4 +206,47 @@ def health_check(request):
 @ratelimit(key='ip', rate='100/h', block=True)
 @require_http_methods(["GET"])
 def ratelimit_view(request):
-    return JsonResponse({'status': 'ok'}) 
+    return JsonResponse({'status': 'ok'})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_lab_token_view(request):
+    """
+    Generate a lab token for a user-lab combination.
+    This token will be used by the lab environment to verify the user.
+    """
+    try:
+        # Get required data from request
+        lab_id = request.data.get('lab_id')
+        user_data = request.data.get('user_data', {})
+
+        if not lab_id:
+            return Response({
+                'error': 'Lab ID is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate the token
+        token = generate_lab_token(
+            username=request.user.username,
+            lab_id=lab_id,
+            user_data=user_data
+        )
+
+        logger.info(f"Generated lab token for user {request.user.username} and lab {lab_id}")
+
+        return Response({
+            'token': token,
+            'expires_in': 3600  # 1 hour in seconds
+        })
+
+    except ValueError as e:
+        logger.error(f"Error generating lab token: {str(e)}")
+        return Response({
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Unexpected error generating lab token: {str(e)}")
+        return Response({
+            'error': 'Failed to generate lab token'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 

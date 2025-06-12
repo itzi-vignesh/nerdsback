@@ -30,6 +30,7 @@ urlpatterns = [
     path('labs/start/', views.start_lab_session, name='start_lab_session'),
     path('labs/stop/', views.stop_lab_session, name='stop_lab_session'),
     path('labs/details/<str:lab_id>/', views.get_lab_details, name='lab_details'),
+    path('api/labs/token/', views.generate_lab_token_view, name='generate_lab_token'),
 ]
 
 # Serve static and media files in development
