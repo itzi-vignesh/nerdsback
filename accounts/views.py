@@ -125,9 +125,30 @@ class LoginView(APIView):
         if not user:
             return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        login(request, user)
-        token, _ = Token.objects.get_or_create(user=user)
-        return Response({"token": token.key, "user": UserSerializer(user).data})
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+
+        # Add custom claims
+        refresh['token_type'] = 'refresh'
+        refresh['token_version'] = settings.JWT_TOKEN_VERSION
+        refresh['jti'] = generate_jti()
+
+        access['token_type'] = 'access'
+        access['token_version'] = settings.JWT_TOKEN_VERSION
+        access['jti'] = generate_jti()
+
+        # Store fingerprint
+        fingerprint = generate_token_fingerprint(user)
+        store_fingerprint(user.id, fingerprint)
+        refresh['fingerprint'] = fingerprint
+        access['fingerprint'] = fingerprint
+
+        return Response({
+            "access": str(access),
+            "refresh": str(refresh),
+            "user": UserSerializer(user).data
+        })
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -135,17 +156,37 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [TokenAuthentication, SessionAuthentication]
 
-    def post(self, request, *args, **kwargs):  # noqa: D401 – keep signature
-        if token_str := request.data.get("refresh"):
-            try:
-                RefreshToken(token_str).blacklist()
-            except Exception:  # pragma: no cover – log but continue
-                logger.warning("Failed to blacklist refresh token", exc_info=True)
-
-        # Session logout & token delete always attempted.
-        logout(request)
-        Token.objects.filter(user=request.user).delete()
-        return Response({"status": "success", "message": "Successfully logged out"})
+    def post(self, request, *args, **kwargs):
+        try:
+            # Get the refresh token from the request
+            refresh_token = request.data.get("refresh")
+            if refresh_token:
+                # Blacklist the refresh token
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+                
+                # Also blacklist the access token if available
+                if 'jti' in token.payload:
+                    revoke_token(token.payload['jti'])
+                
+                # Clear user fingerprint
+                if request.user.id:
+                    cache_key = f'user_fingerprint_{request.user.id}'
+                    cache.delete(cache_key)
+            
+            # Clear session
+            logout(request)
+            
+            return Response({
+                "status": "success",
+                "message": "Successfully logged out"
+            })
+        except Exception as e:
+            logger.warning(f"Logout error: {str(e)}", exc_info=True)
+            return Response({
+                "status": "error",
+                "message": "Error during logout"
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserDetailView(generics.RetrieveUpdateAPIView):
