@@ -22,6 +22,7 @@ from django_ratelimit.decorators import ratelimit
 from .models import LabFlag, LabSubmission
 from accounts.models import UserLab, UserLabProgress
 from .utils import generate_lab_token, verify_lab_token, extract_user_info
+from .token_utils import token_manager
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ LAB_TEMPLATES = [
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def login_handler(request):
-    """Custom login endpoint returning DRF token + basic user data."""
+    """Custom login endpoint returning both auth and lab tokens + basic user data."""
 
     username = request.data.get("username")
     password = request.data.get("password")
@@ -100,7 +101,24 @@ def login_handler(request):
             status=status.HTTP_401_UNAUTHORIZED,
         )
 
-    token, _ = Token.objects.get_or_create(user=user)
+    # Generate authentication token
+    auth_token, _ = Token.objects.get_or_create(user=user)
+
+    # Generate lab token
+    try:
+        lab_token = token_manager.generate_token_pair(
+            user_id=user.id,
+            username=user.username,
+            email=user.email,
+            role=user.role if hasattr(user, 'role') else None,
+            token_type='lab'
+        )
+    except Exception as e:
+        logger.error(f"Failed to generate lab token: {str(e)}")
+        return Response(
+            {"error": "Failed to generate lab token"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     user_data = {
         "id": user.id,
@@ -112,7 +130,12 @@ def login_handler(request):
         "is_superuser": user.is_superuser,
     }
 
-    return Response({"token": token.key, "user": user_data})
+    return Response({
+        "auth_token": auth_token.key,
+        "lab_token": lab_token['access_token'],
+        "lab_refresh_token": lab_token['refresh_token'],
+        "user": user_data
+    })
 
 # ---------------------------------------------------------------------------
 #                               LAB FLAG / STATUS
@@ -122,7 +145,7 @@ def login_handler(request):
 @permission_classes([IsAuthenticated])
 def verify_flag(request):
     """Very naïve flag‑verification placeholder."""
-
+        
     lab_id = request.data.get("lab_id")
     flag = request.data.get("flag")
 
@@ -156,56 +179,6 @@ def get_lab_status(request):
     return Response([])
 
 # ---------------------------------------------------------------------------
-#                          LAB SESSION (START / STOP)
-# ---------------------------------------------------------------------------
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def start_lab_session(request):
-    lab_id = request.data.get("lab_id")
-    user_hash = request.data.get("user_hash")
-
-    if not lab_id or not user_hash:
-        return Response(
-            {"error": "Lab ID and user hash are required"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # TODO: spin‑up logic here
-    return Response(
-        {
-            "status": "success",
-            "message": "Lab session started",
-            "url": f"https://lab-{lab_id}.nerdslab.in",
-        }
-    )
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def stop_lab_session(request):
-    lab_id = request.data.get("lab_id")
-    user_hash = request.data.get("user_hash")
-
-    if not lab_id or not user_hash:
-        return Response(
-            {"error": "Lab ID and user hash are required"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # TODO: tear‑down logic here
-    return Response({"status": "success", "message": "Lab session stopped"})
-
-
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def get_lab_details(request, lab_id):
-    lab_template = next((lab for lab in LAB_TEMPLATES if lab["id"] == lab_id), None)
-    if lab_template is None:
-        return Response({"error": "Lab not found"}, status=status.HTTP_404_NOT_FOUND)
-    return Response(lab_template)
-
-# ---------------------------------------------------------------------------
 #                            HOUSE‑KEEPING ENDPOINTS
 # ---------------------------------------------------------------------------
 
@@ -224,30 +197,138 @@ def ratelimit_view(request):
 #                           LAB TOKEN GENERATION API
 # ---------------------------------------------------------------------------
 
-@api_view(["POST"])
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def generate_lab_token_view(request):
-    """Return short‑lived signed token so the lab VM can verify the user."""
-
-    lab_id = request.data.get("lab_id")
-    user_data = request.data.get("user_data", {})
-
-    if not lab_id:
-        return Response({"error": "Lab ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-
+    """
+    Generate a lab token for a user-lab combination.
+    This token will be used by the lab environment to verify the user.
+    """
     try:
-        token = generate_lab_token(
-            username=request.user.username,
-            lab_id=lab_id,
-            user_data=user_data,
-        )
-        logger.info("Generated lab token for %s – %s", request.user.username, lab_id)
-        return Response({"token": token, "expires_in": 3600})
+        # Get required data from request
+        lab_id = request.data.get('lab_id')
+        user_data = request.data.get('user_data', {})
 
-    except ValueError as exc:
-        logger.error("Error generating lab token: %s", exc)
-        return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        if not lab_id:
+            return Response({
+                'error': 'Lab ID is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-    except Exception as exc:  # noqa: BLE001 – catch‑all for now
-        logger.error("Unexpected error generating lab token: %s", exc)
-        return Response({"error": "Failed to generate lab token"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+        # Prepare user data
+        user_data.update({
+            'id': request.user.id,
+            'username': request.user.username,
+            'email': request.user.email,
+            'role': request.user.role if hasattr(request.user, 'role') else None,
+            'lab_id': lab_id
+        })
+
+        # Generate token pair
+        access_token, refresh_token = token_manager.generate_token_pair(user_data)
+
+        logger.info(f"Generated lab token for user {request.user.username} and lab {lab_id}")
+
+        return Response({
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+            'expires_in': 3600  # 1 hour in seconds
+        })
+
+    except ValueError as e:
+        logger.error(f"Error generating lab token: {str(e)}")
+        return Response({
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Unexpected error generating lab token: {str(e)}")
+        return Response({
+            'error': 'Failed to generate lab token'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def refresh_lab_token_view(request):
+    """
+    Refresh a lab token using a refresh token.
+    """
+    try:
+        refresh_token = request.data.get('refresh_token')
+        if not refresh_token:
+            return Response({
+                'error': 'Refresh token is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Generate new token pair
+        tokens = token_manager.refresh_token(refresh_token)
+        if not tokens:
+            return Response({
+                'error': 'Invalid refresh token'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        access_token, new_refresh_token = tokens
+
+        return Response({
+            'access_token': access_token,
+            'refresh_token': new_refresh_token,
+            'expires_in': 3600  # 1 hour in seconds
+        })
+
+    except Exception as e:
+        logger.error(f"Error refreshing lab token: {str(e)}")
+        return Response({
+            'error': 'Failed to refresh token'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_lab_token_view(request):
+    """
+    Verify a token for lab environment access.
+    This endpoint is used by the lab environment to verify tokens.
+    """
+    try:
+        token = request.data.get('token')
+        if not token:
+            return Response(
+                {'error': 'Token is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify the token
+        payload = token_manager.verify_token(token)
+        if not payload:
+            return Response(
+                {'error': 'Invalid token'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Check if token is for lab access
+        if payload.get('token_type') != 'lab':
+            return Response(
+                {'error': 'Invalid token type'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Return minimal required user data
+        user_data = {
+            'user_id': payload.get('user_id'),
+            'username': payload.get('username'),
+            'email': payload.get('email'),
+            'role': payload.get('role'),
+            'lab_id': payload.get('lab_id'),
+            'token_type': payload.get('token_type'),
+            'exp': payload.get('exp')
+        }
+
+        # Log successful verification
+        logger.info(f"Token verified successfully for user {user_data['username']}")
+
+        return Response(user_data)
+
+    except Exception as e:
+        logger.error(f"Token verification failed: {str(e)}")
+        return Response(
+            {'error': 'Token verification failed'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        ) 

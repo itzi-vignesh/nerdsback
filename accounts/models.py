@@ -36,50 +36,6 @@ class PasswordResetToken(models.Model):
     def __str__(self):
         return f"Password reset token for {self.user.username}"
 
-class UserLab(models.Model):
-    """
-    Model to track lab instances created by users.
-    """
-    LAB_STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('completed', 'Completed'),
-        ('expired', 'Expired'),
-        ('deleted', 'Deleted'),
-    ]
-    
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='labs')
-    lab_id = models.CharField(max_length=64, unique=True)
-    lab_type = models.CharField(max_length=64)
-    lab_url = models.URLField()
-    status = models.CharField(max_length=20, choices=LAB_STATUS_CHOICES, default='active')
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(blank=True, null=True)
-    completed_at = models.DateTimeField(blank=True, null=True)
-    
-    class Meta:
-        ordering = ['-created_at']
-    
-    def __str__(self):
-        return f"{self.user.username} - {self.lab_type} - {self.lab_id}"
-
-class UserLabProgress(models.Model):
-    """
-    Model to track user progress in a lab.
-    """
-    user_lab = models.ForeignKey(UserLab, on_delete=models.CASCADE, related_name='progress')
-    step = models.CharField(max_length=64)
-    is_completed = models.BooleanField(default=False)
-    notes = models.TextField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        ordering = ['created_at']
-        unique_together = ('user_lab', 'step')
-    
-    def __str__(self):
-        return f"{self.user_lab} - {self.step} - {'Completed' if self.is_completed else 'In Progress'}"
-
 class EmailVerificationToken(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_verification_tokens')
     token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)

@@ -48,8 +48,18 @@ if not LAB_SECRET_KEY:
     raise ValueError("LAB_SECRET_KEY environment variable is required. Please ensure it is set in .env.production file.")
 
 # Token settings
-LAB_TOKEN_EXPIRY = int(os.environ.get('LAB_TOKEN_EXPIRY', '3600'))  # 1 hour in seconds
-LAB_TOKEN_ALGORITHM = 'HS256'
+TOKEN_SETTINGS = {
+    'SECRET_KEY': os.getenv('LAB_SERVICE_TOKEN'),
+    'ALGORITHM': 'HS256',
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'TOKEN_VERSION': '1.0',
+    'BLACKLIST_ENABLED': True,
+    'FINGERPRINT_ENABLED': True,
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True
+}
 
 # Application definition
 INSTALLED_APPS = [
@@ -264,8 +274,16 @@ SESSION_CACHE_ALIAS = 'default'
 # Cache settings - using local memory cache instead of Redis
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake',
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'RETRY_ON_TIMEOUT': True,
+            'MAX_CONNECTIONS': 1000,
+            'CONNECTION_POOL_KWARGS': {'max_connections': 100}
+        }
     }
 }
 
@@ -309,27 +327,29 @@ JWT_TOKEN_VERSION = '1.0'  # For future token invalidation
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-main-backend-jwt-secret-key-here')  # Must match main backend
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': JWT_SECRET_KEY,
+    'ACCESS_TOKEN_LIFETIME': TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME'],
+    'REFRESH_TOKEN_LIFETIME': TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME'],
+    'ROTATE_REFRESH_TOKENS': TOKEN_SETTINGS['ROTATE_REFRESH_TOKENS'],
+    'BLACKLIST_AFTER_ROTATION': TOKEN_SETTINGS['BLACKLIST_AFTER_ROTATION'],
+    'UPDATE_LAST_LOGIN': TOKEN_SETTINGS['UPDATE_LAST_LOGIN'],
+    
+    'ALGORITHM': TOKEN_SETTINGS['ALGORITHM'],
+    'SIGNING_KEY': TOKEN_SETTINGS['SECRET_KEY'],
     'VERIFYING_KEY': None,
-    'AUDIENCE': None,
-    'ISSUER': None,
+    
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
-    'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
+    
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
+    
     'JTI_CLAIM': 'jti',
-    'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
+    
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
-    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+    'SLIDING_TOKEN_LIFETIME': TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME'],
+    'SLIDING_TOKEN_REFRESH_LIFETIME': TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME'],
 }
 
 # Logging

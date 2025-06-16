@@ -62,7 +62,7 @@ class RegisterView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes: list[Any] = []
     serializer_class = RegisterSerializer
-
+    
     def post(self, request, *args, **kwargs):  # noqa: D401 – keep signature
         """Handle user registration with atomic transaction and token return."""
         serializer = RegisterSerializer(data=request.data)
@@ -73,11 +73,11 @@ class RegisterView(APIView):
             with transaction.atomic():
                 user = serializer.save()
                 token, _ = Token.objects.get_or_create(user=user)
-
+            
             return Response(
                 {
-                    "message": "Registration successful.",
-                    "user": UserSerializer(user).data,
+                "message": "Registration successful.",
+                "user": UserSerializer(user).data,
                     "token": token.key,
                 },
                 status=status.HTTP_201_CREATED,
@@ -87,7 +87,7 @@ class RegisterView(APIView):
             if "password" in errors:
                 errors["password"] = self._friendly_password_errors(errors["password"])
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-
+    
     @staticmethod
     def _friendly_password_errors(password_errors):  # type: ignore[override]
         msgs: list[str] = []
@@ -155,7 +155,7 @@ class LoginView(APIView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [TokenAuthentication, SessionAuthentication]
-
+    
     def post(self, request, *args, **kwargs):
         try:
             # Get the refresh token from the request
@@ -192,7 +192,7 @@ class LogoutView(APIView):
 class UserDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
-
+    
     def get_object(self):  # noqa: D401 – DRF override
         return self.request.user
 
@@ -205,7 +205,7 @@ class PasswordResetRequestView(APIView):
         serializer = PasswordResetRequestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+            
         email = serializer.validated_data["email"]
         try:
             user = User.objects.get(email=email)
@@ -233,7 +233,7 @@ class PasswordResetRequestView(APIView):
             [user.email],
         )
         msg.attach_alternative(html, "text/html")
-
+            
         last_err: Exception | None = None
         for attempt in range(1, settings.SMTP_MAX_RETRIES + 1):
             try:
