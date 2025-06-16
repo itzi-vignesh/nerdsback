@@ -19,7 +19,7 @@ from rest_framework.authtoken.models import Token
 
 from django_ratelimit.decorators import ratelimit
 
-from accounts.models import UserLab, UserLabProgress
+from .models import UserLab, UserLabProgress
 from .utils import generate_lab_token, verify_lab_token, extract_user_info
 from .token_utils import token_manager
 
