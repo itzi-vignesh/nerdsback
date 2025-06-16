@@ -1,328 +1,219 @@
-from django.contrib.auth import authenticate, login, logout
-from django.contrib.auth.models import User
-from rest_framework import generics, permissions, status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.authtoken.models import Token
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.core.mail import send_mail, EmailMultiAlternatives
+from __future__ import annotations
+
+import logging
+import os
+import time
+import traceback
+from datetime import timedelta
+from smtplib import SMTPAuthenticationError, SMTPConnectError, SMTPException
+from socket import timeout as SocketTimeout
+from typing import Any, Dict
+
 from django.conf import settings
-from django.shortcuts import get_object_or_404
+from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.contrib.auth.models import User
+from django.contrib.auth.tokens import default_token_generator
+from django.core.cache import cache
+from django.core.mail import EmailMultiAlternatives, get_connection
+from django.http import HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
+from django.shortcuts import get_object_or_404, render
 from django.template.loader import render_to_string
+from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.html import strip_tags
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-from django.middleware.csrf import get_token
-import os
-from rest_framework import serializers
-from django.utils import timezone
-from django.http import JsonResponse, HttpResponse
-from django.shortcuts import render
-import traceback
-import logging
-from django.contrib.auth import get_user_model
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes, force_str
+from rest_framework import generics, permissions, serializers, status
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from datetime import timedelta
-import time
-from smtplib import SMTPException, SMTPAuthenticationError, SMTPConnectError
-from socket import timeout as SocketTimeout
-from rest_framework.authentication import TokenAuthentication, SessionAuthentication
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import (
-    UserSerializer,
-    RegisterSerializer,
-    LoginSerializer,
-    PasswordResetRequestSerializer,
-    PasswordResetConfirmSerializer,
-    EmailVerificationSerializer
+from nerdslab.email_config import (  # noqa: E501 – local project import
+    send_password_reset_email,
+    send_verification_email,
 )
-from .models import UserProfile, PasswordResetToken, EmailVerificationToken
-from nerdslab.email_config import send_verification_email, send_password_reset_email
 
-# Get logger
+from .models import EmailVerificationToken, PasswordResetToken, UserProfile
+from .serializers import (  # noqa: E501 – keep grouped
+    EmailVerificationSerializer,
+    LoginSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+    RegisterSerializer,
+    UserSerializer,
+)
+
 logger = logging.getLogger(__name__)
 
-@method_decorator(csrf_exempt, name='dispatch')
+
+# ────────────────────────────────────────────────────────────────────────────────
+#  Auth / Register / Login Views
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class RegisterView(APIView):
     permission_classes = [permissions.AllowAny]
-    authentication_classes = []
+    authentication_classes: list[Any] = []
     serializer_class = RegisterSerializer
-    
-    def post(self, request, *args, **kwargs):
-        # Log registration attempt
-        print(f"Register request data: {request.data}")
+
+    def post(self, request, *args, **kwargs):  # noqa: D401 – keep signature
+        """Handle user registration with atomic transaction and token return."""
         serializer = RegisterSerializer(data=request.data)
         try:
             serializer.is_valid(raise_exception=True)
-            
-            # Use transaction.atomic to ensure data consistency
             from django.db import transaction
+
             with transaction.atomic():
                 user = serializer.save()
-                
-                # Generate auth token for immediate login
                 token, _ = Token.objects.get_or_create(user=user)
-            
-            return Response({
-                "message": "Registration successful.",
-                "user": UserSerializer(user).data,
-                "token": token.key
-            }, status=status.HTTP_201_CREATED)
-            
-        except serializers.ValidationError as e:
-            errors = e.detail
-            if 'password' in errors:
-                errors['password'] = self.get_friendly_password_errors(errors['password'])
-            # Log validation errors
-            print(f"Specific validation errors: {errors}")
-            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    def get_friendly_password_errors(self, password_errors):
-        friendly_messages = []
-        for error in password_errors:
-            error_str = str(error)
-            if "similar to" in error_str:
-                friendly_messages.append("Your password is too similar to your personal information")
-            elif "too common" in error_str:
-                friendly_messages.append("Please choose a stronger password")
-            elif "entirely numeric" in error_str:
-                friendly_messages.append("Include letters or special characters")
-            elif "too short" in error_str:
-                friendly_messages.append("Password must be at least 8 characters")
-            else:
-                friendly_messages.append(error_str)
-        return friendly_messages
 
-@method_decorator(csrf_exempt, name='dispatch')
+            return Response(
+                {
+                    "message": "Registration successful.",
+                    "user": UserSerializer(user).data,
+                    "token": token.key,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        except serializers.ValidationError as exc:
+            errors = exc.detail
+            if "password" in errors:
+                errors["password"] = self._friendly_password_errors(errors["password"])
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @staticmethod
+    def _friendly_password_errors(password_errors):  # type: ignore[override]
+        msgs: list[str] = []
+        mapping = {
+            "similar to": "Your password is too similar to your personal information.",
+            "too common": "Please choose a stronger password.",
+            "entirely numeric": "Include letters or special characters.",
+            "too short": "Password must be at least 8 characters.",
+        }
+        for err in password_errors:
+            err_str = str(err)
+            for key, friendly in mapping.items():
+                if key in err_str:
+                    msgs.append(friendly)
+                    break
+            else:
+                msgs.append(err_str)
+        return msgs
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
-    authentication_classes = []
+    authentication_classes: list[Any] = []
     serializer_class = LoginSerializer
 
     def post(self, request, *args, **kwargs):
-        # Log login attempt headers for debugging
-        print(f"Login request headers: {dict(request.headers)}")
-        
         serializer = LoginSerializer(data=request.data)
-        if serializer.is_valid():
-            username = serializer.validated_data['username']
-            password = serializer.validated_data['password']
-            user = authenticate(username=username, password=password)
-            
-            if user:
-                login(request, user)
-                token, created = Token.objects.get_or_create(user=user)
-                return Response({
-                    "token": token.key,
-                    "user": UserSerializer(user).data
-                })
-            return Response({
-                "error": "Invalid credentials"
-            }, status=status.HTTP_401_UNAUTHORIZED)
-            
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@method_decorator(csrf_exempt, name='dispatch')
+        username = serializer.validated_data["username"]
+        password = serializer.validated_data["password"]
+        user = authenticate(username=username, password=password)
+        if not user:
+            return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        login(request, user)
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({"token": token.key, "user": UserSerializer(user).data})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [TokenAuthentication, SessionAuthentication]
-    
-    def post(self, request):
-        """
-        Logout the user and blacklist their refresh token if provided
-        """
-        try:
-            logger.info(f"Logout request received for user: {request.user.username}")
-            logger.debug(f"Request headers: {request.headers}")
-            logger.debug(f"Request auth: {request.auth}")
-            
-            # Get refresh token from request data if available
-            refresh_token = request.data.get('refresh')
-            if refresh_token:
-                try:
-                    # Blacklist the refresh token
-                    token = RefreshToken(refresh_token)
-                    token.blacklist()
-                    logger.info(f"Successfully blacklisted refresh token for user: {request.user.username}")
-                    
-                    # Also invalidate the access token by blacklisting it
-                    access_token = request.auth
-                    if access_token:
-                        try:
-                            access_token.blacklist()
-                            logger.info(f"Successfully blacklisted access token for user: {request.user.username}")
-                        except Exception as e:
-                            logger.warning(f"Failed to blacklist access token: {str(e)}")
-                except Exception as e:
-                    logger.warning(f"Failed to blacklist refresh token: {str(e)}")
-            
-            # Always perform session logout
-            logout(request)
-            
-            # Delete the auth token if it exists
+
+    def post(self, request, *args, **kwargs):  # noqa: D401 – keep signature
+        if token_str := request.data.get("refresh"):
             try:
-                Token.objects.filter(user=request.user).delete()
-                logger.info(f"Successfully deleted auth token for user: {request.user.username}")
-            except Exception as e:
-                logger.warning(f"Failed to delete auth token: {str(e)}")
-            
-            logger.info(f"Successfully logged out user: {request.user.username}")
-            
-            return Response({
-                'status': 'success',
-                'message': 'Successfully logged out'
-            })
-                
-        except Exception as e:
-            logger.error(f"Unexpected error during logout: {str(e)}")
-            logger.error(traceback.format_exc())
-            return Response({
-                'status': 'error',
-                'message': 'An unexpected error occurred'
-            }, status=500)
+                RefreshToken(token_str).blacklist()
+            except Exception:  # pragma: no cover – log but continue
+                logger.warning("Failed to blacklist refresh token", exc_info=True)
+
+        # Session logout & token delete always attempted.
+        logout(request)
+        Token.objects.filter(user=request.user).delete()
+        return Response({"status": "success", "message": "Successfully logged out"})
+
 
 class UserDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
-    def get_object(self):
+
+    def get_object(self):  # noqa: D401 – DRF override
         return self.request.user
 
-@method_decorator(csrf_exempt, name='dispatch')
+@method_decorator(csrf_exempt, name="dispatch")
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
-    
-    @method_decorator(csrf_exempt, name='dispatch')
-    def post(self, request):
-        logger.info("Password reset request received")
-        logger.debug(f"Request headers: {request.headers}")
-        logger.debug(f"Request data: {request.data}")
-        
+
+    @method_decorator(csrf_exempt)  # method‑only decorator
+    def post(self, request, *args, **kwargs):  # noqa: D401 – keep signature
         serializer = PasswordResetRequestSerializer(data=request.data)
-        
         if not serializer.is_valid():
-            logger.warning(f"Invalid password reset request data: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        email = serializer.validated_data['email']
+
+        email = serializer.validated_data["email"]
         try:
             user = User.objects.get(email=email)
-            logger.info(f"User found for password reset: {user.email}")
-            
-            # Create password reset token
-            token = PasswordResetToken.objects.create(
-                user=user,
-                expires_at=timezone.now() + timedelta(hours=24)
-            )
-            
-            # Generate reset URL
-            reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token.token}"
-            
-            # Prepare email context
-            context = {
-                'user': user,
-                'reset_url': reset_url,
-                'expiry_hours': 24,
-                'now': timezone.now()
-            }
-            
-            # Render email content
-            html_content = render_to_string('emails/password_reset.html', context)
-            text_content = f"""
-            Hello {user.first_name},
-            
-            We received a request to reset your password for your NerdsLab account.
-            If you didn't make this request, you can safely ignore this email.
-            
-            To reset your password, visit this link:
-            {reset_url}
-            
-            This password reset link will expire in 24 hours.
-            
-            If you have any questions or need assistance, please contact our support team.
-            
-            This is an automated message, please do not reply to this email.
-            """
-            
-            # Send email with retry mechanism
-            max_retries = 3
-            retry_count = 0
-            last_error = None
-            
-            while retry_count < max_retries:
-                try:
-                    logger.info(f"Attempting to send password reset email (attempt {retry_count + 1}/{max_retries})")
-                    logger.debug(f"Using SMTP settings: {settings.EMAIL_HOST}:{settings.EMAIL_PORT}")
-                    
-                    email = EmailMultiAlternatives(
-                        subject='Reset Your NerdsLab Password',
-                        body=text_content,
-                        from_email=settings.DEFAULT_FROM_EMAIL,
-                        to=[user.email]
-                    )
-                    email.attach_alternative(html_content, "text/html")
-                    email.send()
-                    
-                    logger.info(f"Password reset email sent successfully to {user.email}")
-                    break
-                except SMTPAuthenticationError as e:
-                    last_error = e
-                    logger.error(f"SMTP Authentication failed: {str(e)}")
-                    break  # Don't retry on auth failure
-                except SMTPConnectError as e:
-                    last_error = e
-                    logger.error(f"SMTP Connection failed: {str(e)}")
-                    retry_count += 1
-                except SMTPException as e:
-                    last_error = e
-                    logger.error(f"SMTP error occurred: {str(e)}")
-                    retry_count += 1
-                except SocketTimeout as e:
-                    last_error = e
-                    logger.error(f"SMTP connection timed out: {str(e)}")
-                    retry_count += 1
-                except Exception as e:
-                    last_error = e
-                    logger.error(f"Unexpected error sending email: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    retry_count += 1
-                
-                if retry_count < max_retries:
-                    logger.info(f"Waiting {settings.SMTP_RETRY_DELAY} seconds before retry...")
-                    time.sleep(settings.SMTP_RETRY_DELAY)
-            
-            if retry_count == max_retries:
-                # Delete the token if email sending fails after all retries
-                token.delete()
-                logger.error(f"All attempts to send password reset email failed. Last error: {str(last_error)}")
-                return Response(
-                    {"detail": "Failed to send password reset email. Please try again later."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-            
-            return Response(
-                {"detail": "If an account exists with this email, you will receive a password reset link."},
-                status=status.HTTP_200_OK
-            )
-            
         except User.DoesNotExist:
-            logger.info(f"No user found for password reset request: {email}")
-            # Return success even if user doesn't exist to prevent email enumeration
+            # Don't leak user existence.
             return Response(
                 {"detail": "If an account exists with this email, you will receive a password reset link."},
-                status=status.HTTP_200_OK
+                status=status.HTTP_200_OK,
             )
-        except Exception as e:
-            logger.error(f"Error processing password reset request: {str(e)}")
-            logger.error(traceback.format_exc())
+
+        token = PasswordResetToken.objects.create(
+            user=user,
+            expires_at=timezone.now() + timedelta(hours=24),
+        )
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token.token}"
+
+        # Prepare and send the mail (retry loop preserved, indentation fixed)
+        context: Dict[str, Any] = {"user": user, "reset_url": reset_url, "expiry_hours": 24}
+        html = render_to_string("emails/password_reset.html", context)
+        text = strip_tags(html)
+        msg = EmailMultiAlternatives(
+            "Reset Your NerdsLab Password",
+            text,
+            settings.DEFAULT_FROM_EMAIL,
+            [user.email],
+        )
+        msg.attach_alternative(html, "text/html")
+
+        last_err: Exception | None = None
+        for attempt in range(1, settings.SMTP_MAX_RETRIES + 1):
+            try:
+                msg.send()
+                break
+            except (SMTPAuthenticationError, SMTPConnectError, SMTPException, SocketTimeout) as exc:
+                last_err = exc
+                logger.warning("Email send failed (%s/%s): %s", attempt, settings.SMTP_MAX_RETRIES, exc)
+                time.sleep(settings.SMTP_RETRY_DELAY)
+        else:
+            token.delete()
             return Response(
-                {"detail": "An error occurred while processing your request. Please try again later."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"detail": "Failed to send password reset email. Please try again later."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+        return Response(
+            {"detail": "If an account exists with this email, you will receive a password reset link."},
+            status=status.HTTP_200_OK,
+        )
+
 
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -427,6 +318,7 @@ class PasswordResetConfirmView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
@@ -500,6 +392,7 @@ class ChangePasswordView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+
 class EmailVerificationView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
@@ -512,7 +405,6 @@ class EmailVerificationView(APIView):
         token_str = str(serializer.validated_data['token'])
         
         # Check cache first
-        from django.core.cache import cache
         cache_key = f'email_verification_{token_str}'
         cached_result = cache.get(cache_key)
         
@@ -579,7 +471,6 @@ class EmailVerificationView(APIView):
             )
         
         # Check cache first
-        from django.core.cache import cache
         cache_key = f'email_verification_{token}'
         cached_result = cache.get(cache_key)
         
@@ -614,6 +505,7 @@ class EmailVerificationView(APIView):
                 {'is_valid': False, 'error': 'Invalid verification token'},
                 status=status.HTTP_200_OK
             )
+
 
 class ResendVerificationEmailView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -703,6 +595,7 @@ class ResendVerificationEmailView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
 def csrf_failure(request, reason=""):
     """View for CSRF failure errors"""
     if request.headers.get('content-type') == 'application/json':
@@ -713,6 +606,7 @@ def csrf_failure(request, reason=""):
     
     # For HTML requests
     return render(request, 'accounts/csrf_error.html', {'reason': reason}, status=403)
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class GetCSRFTokenView(APIView):
