@@ -21,7 +21,6 @@ required_env_vars = [
     'LAB_SECRET_KEY',
     'EMAIL_HOST_USER',
     'EMAIL_HOST_PASSWORD',
-    'REDIS_PASSWORD',
 ]
 
 # Validate required environment variables
@@ -271,19 +270,11 @@ RATE_LIMIT_PERIOD = int(os.getenv('RATE_LIMIT_PERIOD', '60'))
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_CACHE_ALIAS = 'default'
 
-# Cache settings - using local memory cache instead of Redis
+# Cache settings
 CACHES = {
     'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1'),
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'SOCKET_CONNECT_TIMEOUT': 5,
-            'SOCKET_TIMEOUT': 5,
-            'RETRY_ON_TIMEOUT': True,
-            'MAX_CONNECTIONS': 1000,
-            'CONNECTION_POOL_KWARGS': {'max_connections': 100}
-        }
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
     }
 }
 

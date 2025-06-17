@@ -24,11 +24,15 @@ class TokenManager:
 
     def _get_or_create_encryption_key(self):
         """Get or create encryption key for token payload encryption."""
-        key = cache.get('token_encryption_key')
-        if not key:
-            key = Fernet.generate_key()
-            cache.set('token_encryption_key', key, timeout=None)  # Store indefinitely
-        return key
+        try:
+            key = cache.get('token_encryption_key')
+            if not key:
+                key = Fernet.generate_key()
+                cache.set('token_encryption_key', key, timeout=None)  # Store indefinitely
+            return key
+        except Exception as e:
+            logger.warning(f"Cache error, generating new key: {str(e)}")
+            return Fernet.generate_key()
 
     def _encrypt_payload(self, payload):
         """Encrypt token payload data."""
@@ -158,26 +162,29 @@ class TokenManager:
 
     def _store_fingerprint(self, fingerprint, user_id, token_id, lab_id=None):
         """Store token fingerprint and info in cache with encryption."""
-        cache_key = f"token_fingerprint_{fingerprint}"
-        data = {
-            'user_id': user_id,
-            'token_id': token_id,
-            'lab_id': lab_id,
-            'created_at': datetime.utcnow().timestamp()
-        }
-        # Encrypt fingerprint data
-        encrypted_data = self._encrypt_payload(data)
-        cache.set(cache_key, encrypted_data, timeout=self.access_token_lifetime)
+        try:
+            cache_key = f"token_fingerprint_{fingerprint}"
+            data = {
+                'user_id': user_id,
+                'token_id': token_id,
+                'lab_id': lab_id,
+                'created_at': datetime.utcnow().timestamp()
+            }
+            # Encrypt fingerprint data
+            encrypted_data = self._encrypt_payload(data)
+            cache.set(cache_key, encrypted_data, timeout=self.access_token_lifetime)
+        except Exception as e:
+            logger.warning(f"Failed to store fingerprint: {str(e)}")
 
     def _verify_fingerprint(self, fingerprint, user_id, token_id, lab_id=None):
         """Verify token fingerprint with encrypted data."""
-        cache_key = f"token_fingerprint_{fingerprint}"
-        encrypted_data = cache.get(cache_key)
-        
-        if not encrypted_data:
-            return False
-            
         try:
+            cache_key = f"token_fingerprint_{fingerprint}"
+            encrypted_data = cache.get(cache_key)
+            
+            if not encrypted_data:
+                return False
+                
             stored_data = self._decrypt_payload(encrypted_data)
             return (
                 stored_data['user_id'] == user_id and
@@ -189,18 +196,21 @@ class TokenManager:
 
     def _is_token_blacklisted(self, token_id):
         """Check if token is blacklisted."""
-        return cache.get(f"token_blacklist_{token_id}") is not None
+        try:
+            return cache.get(f"token_blacklist_{token_id}") is not None
+        except Exception:
+            return False
 
     def _verify_lab_access(self, user_id, lab_id, requested_url):
         """Verify user has access to the requested lab URL."""
-        # Get user's active lab sessions
-        cache_key = f"user_lab_sessions_{user_id}"
-        encrypted_sessions = cache.get(cache_key)
-        
-        if not encrypted_sessions:
-            return False
-            
         try:
+            # Get user's active lab sessions
+            cache_key = f"user_lab_sessions_{user_id}"
+            encrypted_sessions = cache.get(cache_key)
+            
+            if not encrypted_sessions:
+                return False
+                
             user_sessions = self._decrypt_payload(encrypted_sessions)
             # Check if user has an active session for this lab
             for session in user_sessions:
@@ -218,25 +228,28 @@ class TokenManager:
 
     def _log_access_attempt(self, user_id, token_id, requested_url, user_agent, ip_address):
         """Log token access attempt for security monitoring."""
-        log_data = {
-            'user_id': user_id,
-            'token_id': token_id,
-            'requested_url': requested_url,
-            'user_agent': user_agent,
-            'ip_address': ip_address,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-        # Encrypt and store in cache
-        encrypted_log = self._encrypt_payload(log_data)
-        cache_key = f"access_log_{user_id}_{token_id}"
-        cache.set(cache_key, encrypted_log, timeout=3600)  # Store for 1 hour
-        
-        # Log to system (with sensitive data redacted)
-        safe_log_data = {**log_data}
-        safe_log_data['user_agent'] = hashlib.sha256(user_agent.encode()).hexdigest() if user_agent else None
-        safe_log_data['ip_address'] = hashlib.sha256(ip_address.encode()).hexdigest() if ip_address else None
-        logger.info(f"Token access: {safe_log_data}")
+        try:
+            log_data = {
+                'user_id': user_id,
+                'token_id': token_id,
+                'requested_url': requested_url,
+                'user_agent': user_agent,
+                'ip_address': ip_address,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+            # Encrypt and store in cache
+            encrypted_log = self._encrypt_payload(log_data)
+            cache_key = f"access_log_{user_id}_{token_id}"
+            cache.set(cache_key, encrypted_log, timeout=3600)  # Store for 1 hour
+            
+            # Log to system (with sensitive data redacted)
+            safe_log_data = {**log_data}
+            safe_log_data['user_agent'] = hashlib.sha256(user_agent.encode()).hexdigest() if user_agent else None
+            safe_log_data['ip_address'] = hashlib.sha256(ip_address.encode()).hexdigest() if ip_address else None
+            logger.info(f"Token access: {safe_log_data}")
+        except Exception as e:
+            logger.warning(f"Failed to log access attempt: {str(e)}")
 
 # Create singleton instance
 token_manager = TokenManager() 
