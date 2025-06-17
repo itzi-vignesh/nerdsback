@@ -10,7 +10,7 @@ class UserLab(models.Model):
     flag = models.CharField(max_length=255)  # Store the correct flag
     attempts = models.IntegerField(default=0)
     last_attempt = models.DateTimeField(null=True, blank=True)
-    
+
     class Meta:
         unique_together = ('user', 'lab_id')
         
@@ -20,7 +20,7 @@ class UserLab(models.Model):
         self.last_attempt = timezone.now()
         self.save()
         return submitted_flag == self.flag
-    
+
     def __str__(self):
         return f"{self.user.username} - {self.lab_id}"
 
@@ -33,7 +33,7 @@ class UserLabProgress(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     last_attempt = models.DateTimeField(null=True, blank=True)
     score = models.IntegerField(default=0)
-    
+
     class Meta:
         unique_together = ('user', 'lab_id')
         verbose_name_plural = 'User lab progress'
@@ -45,7 +45,7 @@ class UserLabProgress(models.Model):
         if score is not None:
             self.score = score
         self.save()
-    
+
     def __str__(self):
         return f"{self.user.username} - {self.lab_id} ({'Completed' if self.completed else 'In Progress'})"
 

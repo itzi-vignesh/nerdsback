@@ -21,16 +21,15 @@ def test_view(request):
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('accounts.urls')),
-    path('health/', api_health_check, name='health-check'),
-    path('test/', test_view, name='test_view'),
-    path('api/v1/login-handler/', views.login_handler, name='login_handler'),
+    path('health/', views.health_check, name='health_check'),
+    path('test/', views.ratelimit_view, name='ratelimit_view'),
+    path('auth/login/', views.login_handler, name='login'),
+    path('labs/token/generate/', views.generate_lab_token_view, name='generate_lab_token'),
+    path('labs/token/refresh/', views.refresh_lab_token_view, name='refresh_lab_token'),
+    path('labs/token/verify/', views.verify_lab_token_view, name='verify_lab_token'),
     path('labs/templates/', views.get_lab_templates, name='lab_templates'),
-    path('labs/verify-flag/', views.verify_flag, name='verify_flag'),
     path('labs/status/', views.get_lab_status, name='lab_status'),
-    path('labs/start/', views.start_lab_session, name='start_lab_session'),
-    path('labs/stop/', views.stop_lab_session, name='stop_lab_session'),
-    path('labs/details/<str:lab_id>/', views.get_lab_details, name='lab_details'),
-    path('api/labs/token/', views.generate_lab_token_view, name='generate_lab_token'),
+    path('labs/verify-flag/', views.verify_flag, name='verify_flag'),
 ]
 
 # Serve static and media files in development
