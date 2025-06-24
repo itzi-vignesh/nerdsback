@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.http import JsonResponse
 import logging
+from datetime import datetime
 
 import psutil
 import requests
@@ -488,3 +489,22 @@ def decrypt_frontend_data(request):
             {"error": "Decryption failed"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+# ---------------------------------------------------------------------------
+#                           CONNECTIVITY TEST ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def api_test_endpoint(request):
+    """Simple test endpoint to verify API connectivity."""
+    return Response({
+        'status': 'success',
+        'message': 'API is working correctly',
+        'method': request.method,
+        'timestamp': datetime.now().isoformat(),
+        'cors_test': True,
+        'data': request.data if request.method == 'POST' else None
+    })
+
+# ---------------------------------------------------------------------------

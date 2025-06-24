@@ -33,6 +33,7 @@ urlpatterns = [
     path('labs/templates/', views.get_lab_templates, name='lab_templates'),
     path('labs/status/', views.get_lab_status, name='lab_status'),
     path('labs/verify-flag/', views.verify_flag, name='verify_flag'),
+    path('api/test/', views.api_test_endpoint, name='api_test'),  # Test endpoint
 ]
 
 # Serve static and media files in development
