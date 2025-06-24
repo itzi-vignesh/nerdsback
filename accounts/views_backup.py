@@ -34,12 +34,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from nerdslab.email_config import (  # noqa: E501 – local project import
     send_password_reset_email,
     send_verification_email,
 )
-from nerdslab.token_utils import token_manager
 
 from .models import EmailVerificationToken, PasswordResetToken, UserProfile
 from .serializers import (  # noqa: E501 – keep grouped
@@ -151,7 +151,7 @@ class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes: list[Any] = []
     serializer_class = LoginSerializer
-    
+
     def post(self, request, *args, **kwargs):
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
@@ -163,51 +163,30 @@ class LoginView(APIView):
         if not user:
             return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        if not user.is_active:
-            return Response({"error": "Account is inactive. Please verify your email."}, status=status.HTTP_401_UNAUTHORIZED)        # Generate secure JWT tokens using our custom token manager
-        try:
-            from nerdslab.frontend_crypto import FrontendCrypto
-            
-            tokens = token_manager.generate_token_pair(
-                user_id=user.id,
-                username=user.username,
-                email=user.email,
-                role=getattr(user, 'role', None),
-                token_type='auth'
-            )
-            
-            # Generate traditional auth token for backward compatibility
-            auth_token, _ = Token.objects.get_or_create(user=user)
-            
-            # Prepare data for encryption
-            crypto = FrontendCrypto()
-            sensitive_data = {
-                "access": tokens['access_token'],
-                "refresh": tokens['refresh_token'],
-                "auth_token": auth_token.key,
-                "user": UserSerializer(user).data
-            }
-            
-            # Encrypt for secure frontend storage
-            encrypted_data = crypto.encrypt_token_data(sensitive_data)
-            
-            return Response({
-                "encrypted_data": encrypted_data,
-                "user_public": {  # Non-sensitive data
-                    "id": user.id,
-                    "username": user.username,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "is_active": user.is_active
-                }
-            })
-            
-        except Exception as e:
-            logger.error(f"Token generation failed: {str(e)}")
-            return Response(
-                {"error": "Authentication failed"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+
+        # Add custom claims
+        refresh['token_type'] = 'refresh'
+        refresh['token_version'] = settings.JWT_TOKEN_VERSION
+        refresh['jti'] = generate_jti()
+
+        access['token_type'] = 'access'
+        access['token_version'] = settings.JWT_TOKEN_VERSION
+        access['jti'] = generate_jti()
+
+        # Store fingerprint
+        fingerprint = generate_token_fingerprint(user)
+        store_fingerprint(user.id, fingerprint)
+        refresh['fingerprint'] = fingerprint
+        access['fingerprint'] = fingerprint
+
+        return Response({
+            "access": str(access),
+            "refresh": str(refresh),
+            "user": UserSerializer(user).data
+        })
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -219,32 +198,19 @@ class LogoutView(APIView):
         try:
             # Get the refresh token from the request
             refresh_token = request.data.get("refresh")
-            access_token = request.data.get("access")
-            
             if refresh_token:
-                # Revoke the refresh token using our token manager
-                try:
-                    token_manager.revoke_token(refresh_token)
-                except Exception as e:
-                    logger.warning(f"Failed to revoke refresh token: {str(e)}")
-            
-            if access_token:
-                # Revoke the access token using our token manager
-                try:
-                    token_manager.revoke_token(access_token)
-                except Exception as e:
-                    logger.warning(f"Failed to revoke access token: {str(e)}")
+                # Blacklist the refresh token
+                token = RefreshToken(refresh_token)
+                token.blacklist()
                 
-            # Clear user fingerprint
-            if request.user.id:
-                cache_key = f'user_fingerprint_{request.user.id}'
-                cache.delete(cache_key)
+                # Also blacklist the access token if available
+                if 'jti' in token.payload:
+                    revoke_token(token.payload['jti'])
                 
-            # Delete auth token
-            try:
-                request.user.auth_token.delete()
-            except Exception:
-                pass
+                # Clear user fingerprint
+                if request.user.id:
+                    cache_key = f'user_fingerprint_{request.user.id}'
+                    cache.delete(cache_key)
             
             # Clear session
             logout(request)
@@ -307,17 +273,14 @@ class PasswordResetRequestView(APIView):
         msg.attach_alternative(html, "text/html")
             
         last_err: Exception | None = None
-        smtp_max_retries = getattr(settings, 'SMTP_MAX_RETRIES', 3)
-        smtp_retry_delay = getattr(settings, 'SMTP_RETRY_DELAY', 2)
-        
-        for attempt in range(1, smtp_max_retries + 1):
+        for attempt in range(1, settings.SMTP_MAX_RETRIES + 1):
             try:
                 msg.send()
                 break
             except (SMTPAuthenticationError, SMTPConnectError, SMTPException, SocketTimeout) as exc:
                 last_err = exc
-                logger.warning("Email send failed (%s/%s): %s", attempt, smtp_max_retries, exc)
-                time.sleep(smtp_retry_delay)
+                logger.warning("Email send failed (%s/%s): %s", attempt, settings.SMTP_MAX_RETRIES, exc)
+                time.sleep(settings.SMTP_RETRY_DELAY)
         else:
             token.delete()
             return Response(
@@ -333,9 +296,13 @@ class PasswordResetRequestView(APIView):
 
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
-    authentication_classes = []
+    authentication_classes = []  # No authentication required for password reset confirmation
     
     def post(self, request):
+        # Debug request information
+        print("Password reset confirm headers:", request.headers)
+        print("Password reset confirm path:", request.path)
+        
         token = request.data.get('token')
         password = request.data.get('password')
         password2 = request.data.get('password2')
@@ -376,6 +343,7 @@ class PasswordResetConfirmView(APIView):
             # Validate password using Django's validators
             user = reset_token.user
             try:
+                # Use the same validation as in the serializer
                 from django.contrib.auth.password_validation import validate_password
                 validate_password(password, user)
                 
@@ -389,19 +357,27 @@ class PasswordResetConfirmView(APIView):
                 
                 return Response({'message': 'Password reset successful'})
             except Exception as validation_error:
-                # Handle password validation errors
+                # Handle password validation errors with more specific messages
                 error_messages = []
                 for error in validation_error:
                     error_str = str(error)
                     
                     if "similar to" in error_str:
-                        error_messages.append("Your password is too similar to your personal information.")
-                    elif "too common" in error_str:
-                        error_messages.append("The password you chose is too common.")
+                        error_messages.append("Your password is too similar to your personal information. Please choose a more unique password.")
+                    elif "too common" in error_str or "commonly used password" in error_str:
+                        error_messages.append("The password you chose is too common. Please choose a stronger password.")
                     elif "entirely numeric" in error_str:
-                        error_messages.append("Your password cannot consist of only numbers.")
+                        error_messages.append("Your password cannot consist of only numbers. Please include letters or special characters.")
                     elif "too short" in error_str:
-                        error_messages.append("Your password is too short. It must contain at least 12 characters.")
+                        error_messages.append("Your password is too short. It must contain at least 8 characters.")
+                    elif "keyboard pattern" in error_str or "common pattern" in error_str or "predictable pattern" in error_str:
+                        error_messages.append("Your password uses a common guessable pattern. Please use a more unique combination.")
+                    elif "common word" in error_str:
+                        error_messages.append("Your password contains a common word that makes it easily guessable. Please choose a stronger password.")
+                    elif "l33t speak" in error_str or "leet_pattern" in error_str or "leet_word" in error_str:
+                        error_messages.append("Your password uses common letter-to-symbol substitutions (like '@' for 'a'). Please use a more unique combination.")
+                    elif "alternating case" in error_str:
+                        error_messages.append("Your password uses an alternating case pattern (like 'QwErTy'). Please use a more unique combination.")
                     else:
                         error_messages.append(error_str)
                 
@@ -426,6 +402,11 @@ class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request):
+        # Debug authentication info
+        print("Auth header:", request.META.get('HTTP_AUTHORIZATION'))
+        print("User authenticated:", request.user.is_authenticated)
+        print("User:", request.user)
+        
         user = request.user
         current_password = request.data.get('current_password')
         new_password = request.data.get('new_password')
@@ -461,19 +442,27 @@ class ChangePasswordView(APIView):
                 'token': token.key
             })
         except Exception as validation_error:
-            # Handle password validation errors
+            # Handle password validation errors with more specific messages
             error_messages = []
             for error in validation_error:
                 error_str = str(error)
                 
                 if "similar to" in error_str:
-                    error_messages.append("Your password is too similar to your personal information.")
-                elif "too common" in error_str:
-                    error_messages.append("The password you chose is too common.")
+                    error_messages.append("Your password is too similar to your personal information. Please choose a more unique password.")
+                elif "too common" in error_str or "commonly used password" in error_str:
+                    error_messages.append("The password you chose is too common. Please choose a stronger password.")
                 elif "entirely numeric" in error_str:
-                    error_messages.append("Your password cannot consist of only numbers.")
+                    error_messages.append("Your password cannot consist of only numbers. Please include letters or special characters.")
                 elif "too short" in error_str:
-                    error_messages.append("Your password is too short. It must contain at least 12 characters.")
+                    error_messages.append("Your password is too short. It must contain at least 8 characters.")
+                elif "keyboard pattern" in error_str or "common pattern" in error_str or "predictable pattern" in error_str:
+                    error_messages.append("Your password uses a common guessable pattern. Please use a more unique combination.")
+                elif "common word" in error_str:
+                    error_messages.append("Your password contains a common word that makes it easily guessable. Please choose a stronger password.")
+                elif "l33t speak" in error_str or "leet_pattern" in error_str or "leet_word" in error_str:
+                    error_messages.append("Your password uses common letter-to-symbol substitutions (like '@' for 'a'). Please use a more unique combination.")
+                elif "alternating case" in error_str:
+                    error_messages.append("Your password uses an alternating case pattern (like 'QwErTy'). Please use a more unique combination.")
                 else:
                     error_messages.append(error_str)
             
@@ -551,11 +540,55 @@ class EmailVerificationView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    def get(self, request):
+        token = request.query_params.get('token')
+        if not token:
+            return Response(
+                {'error': 'Token is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check cache first
+        cache_key = f'email_verification_{token}'
+        cached_result = cache.get(cache_key)
+        
+        if cached_result is not None:
+            return Response(
+                {'is_valid': cached_result.get('is_valid', False)},
+                status=status.HTTP_200_OK
+            )
+        
+        try:
+            token_obj = EmailVerificationToken.objects.get(token=token)
+            is_valid = token_obj.is_valid()
+            
+            # Cache the result
+            cache.set(cache_key, {'is_valid': is_valid}, timeout=48*3600)
+            
+            if not is_valid:
+                return Response(
+                    {'is_valid': False, 'error': 'Verification link is invalid or has expired'},
+                    status=status.HTTP_200_OK
+                )
+            
+            return Response(
+                {'is_valid': True},
+                status=status.HTTP_200_OK
+            )
+            
+        except EmailVerificationToken.DoesNotExist:
+            # Cache negative result
+            cache.set(cache_key, {'is_valid': False}, timeout=48*3600)
+            return Response(
+                {'is_valid': False, 'error': 'Invalid verification token'},
+                status=status.HTTP_200_OK
+            )
 
 
 class ResendVerificationEmailView(APIView):
     permission_classes = [permissions.AllowAny]
-    authentication_classes = []
+    authentication_classes = []  # No authentication required for resending verification
     
     def post(self, request):
         email = request.data.get('email')
@@ -581,12 +614,12 @@ class ResendVerificationEmailView(APIView):
             context = {
                 'verify_url': verify_url,
                 'user': user,
-                'expiry_hours': 48,
+                'expiry_hours': 48,  # Token expiry in hours
             }
             
             # Render HTML email template
             html_content = render_to_string('emails/email_verification.html', context)
-            text_content = strip_tags(html_content)
+            text_content = strip_tags(html_content)  # Generate plain text version
             
             # Create email with timeout settings
             subject = 'Verify Your NerdsLab Account'
@@ -598,23 +631,27 @@ class ResendVerificationEmailView(APIView):
                 text_content, 
                 from_email, 
                 to,
-                connection=get_connection(timeout=getattr(settings, 'EMAIL_TIMEOUT', 30))
+                connection=get_connection(timeout=settings.EMAIL_TIMEOUT)
             )
             msg.attach_alternative(html_content, "text/html")
             
             # Implement retry mechanism
-            smtp_max_retries = getattr(settings, 'SMTP_MAX_RETRIES', 3)
-            smtp_retry_delay = getattr(settings, 'SMTP_RETRY_DELAY', 2)
+            from smtplib import SMTPException
+            from socket import timeout as SocketTimeout
+            import time
+            import logging
             
-            for attempt in range(smtp_max_retries):
+            logger = logging.getLogger('accounts')
+            
+            for attempt in range(settings.SMTP_MAX_RETRIES):
                 try:
                     msg.send()
                     logger.info(f"Resent verification email successfully to {user.email}")
                     return Response({'message': 'Verification email sent'})
                 except (SMTPException, SocketTimeout) as e:
-                    if attempt < smtp_max_retries - 1:
+                    if attempt < settings.SMTP_MAX_RETRIES - 1:
                         logger.warning(f"Resend verification email failed (attempt {attempt + 1}): {str(e)}")
-                        time.sleep(smtp_retry_delay)
+                        time.sleep(settings.SMTP_RETRY_DELAY)
                     else:
                         logger.error(f"All resend verification email attempts failed for {user.email}: {str(e)}")
                         return Response(
@@ -670,7 +707,7 @@ class GetCSRFTokenView(APIView):
                 'csrftoken',
                 csrf_token,
                 samesite='Lax',
-                secure=getattr(settings, 'CSRF_COOKIE_SECURE', False),
+                secure=settings.CSRF_COOKIE_SECURE,
                 httponly=False  # Must be accessible to JavaScript
             )
             

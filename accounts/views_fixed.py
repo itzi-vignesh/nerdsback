@@ -34,12 +34,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from nerdslab.email_config import (  # noqa: E501 – local project import
     send_password_reset_email,
     send_verification_email,
 )
-from nerdslab.token_utils import token_manager
 
 from .models import EmailVerificationToken, PasswordResetToken, UserProfile
 from .serializers import (  # noqa: E501 – keep grouped
@@ -151,7 +151,7 @@ class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes: list[Any] = []
     serializer_class = LoginSerializer
-    
+
     def post(self, request, *args, **kwargs):
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
@@ -164,50 +164,32 @@ class LoginView(APIView):
             return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
         if not user.is_active:
-            return Response({"error": "Account is inactive. Please verify your email."}, status=status.HTTP_401_UNAUTHORIZED)        # Generate secure JWT tokens using our custom token manager
-        try:
-            from nerdslab.frontend_crypto import FrontendCrypto
-            
-            tokens = token_manager.generate_token_pair(
-                user_id=user.id,
-                username=user.username,
-                email=user.email,
-                role=getattr(user, 'role', None),
-                token_type='auth'
-            )
-            
-            # Generate traditional auth token for backward compatibility
-            auth_token, _ = Token.objects.get_or_create(user=user)
-            
-            # Prepare data for encryption
-            crypto = FrontendCrypto()
-            sensitive_data = {
-                "access": tokens['access_token'],
-                "refresh": tokens['refresh_token'],
-                "auth_token": auth_token.key,
-                "user": UserSerializer(user).data
-            }
-            
-            # Encrypt for secure frontend storage
-            encrypted_data = crypto.encrypt_token_data(sensitive_data)
-            
-            return Response({
-                "encrypted_data": encrypted_data,
-                "user_public": {  # Non-sensitive data
-                    "id": user.id,
-                    "username": user.username,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "is_active": user.is_active
-                }
-            })
-            
-        except Exception as e:
-            logger.error(f"Token generation failed: {str(e)}")
-            return Response(
-                {"error": "Authentication failed"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"error": "Account is inactive. Please verify your email."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+
+        # Add custom claims
+        refresh['token_type'] = 'refresh'
+        refresh['token_version'] = settings.JWT_TOKEN_VERSION
+        refresh['jti'] = generate_jti()
+
+        access['token_type'] = 'access'
+        access['token_version'] = settings.JWT_TOKEN_VERSION
+        access['jti'] = generate_jti()
+
+        # Store fingerprint
+        fingerprint = generate_token_fingerprint(user)
+        store_fingerprint(user.id, fingerprint)
+        refresh['fingerprint'] = fingerprint
+        access['fingerprint'] = fingerprint
+
+        return Response({
+            "access": str(access),
+            "refresh": str(refresh),
+            "user": UserSerializer(user).data
+        })
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -219,32 +201,19 @@ class LogoutView(APIView):
         try:
             # Get the refresh token from the request
             refresh_token = request.data.get("refresh")
-            access_token = request.data.get("access")
-            
             if refresh_token:
-                # Revoke the refresh token using our token manager
-                try:
-                    token_manager.revoke_token(refresh_token)
-                except Exception as e:
-                    logger.warning(f"Failed to revoke refresh token: {str(e)}")
-            
-            if access_token:
-                # Revoke the access token using our token manager
-                try:
-                    token_manager.revoke_token(access_token)
-                except Exception as e:
-                    logger.warning(f"Failed to revoke access token: {str(e)}")
+                # Blacklist the refresh token
+                token = RefreshToken(refresh_token)
+                token.blacklist()
                 
-            # Clear user fingerprint
-            if request.user.id:
-                cache_key = f'user_fingerprint_{request.user.id}'
-                cache.delete(cache_key)
+                # Also blacklist the access token if available
+                if 'jti' in token.payload:
+                    revoke_token(token.payload['jti'])
                 
-            # Delete auth token
-            try:
-                request.user.auth_token.delete()
-            except Exception:
-                pass
+                # Clear user fingerprint
+                if request.user.id:
+                    cache_key = f'user_fingerprint_{request.user.id}'
+                    cache.delete(cache_key)
             
             # Clear session
             logout(request)

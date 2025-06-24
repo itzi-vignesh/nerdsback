@@ -16,8 +16,9 @@ class TokenManager:
     def __init__(self):
         self.secret_key = settings.TOKEN_SETTINGS['SECRET_KEY']
         self.algorithm = settings.TOKEN_SETTINGS['ALGORITHM']
-        self.access_token_lifetime = settings.TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME']
-        self.refresh_token_lifetime = settings.TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME']
+        # Convert timedelta to total seconds for proper handling
+        self.access_token_lifetime = int(settings.TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME'].total_seconds())
+        self.refresh_token_lifetime = int(settings.TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME'].total_seconds())
         # Initialize encryption key
         self.encryption_key = self._get_or_create_encryption_key()
         self.cipher_suite = Fernet(self.encryption_key)
@@ -115,9 +116,9 @@ class TokenManager:
             
             # Decrypt payload
             payload = self._decrypt_payload(token_data['data'])
-            
-            # Check token type
-            if payload.get('token_type') != 'lab':
+              # Check token type (accept both lab and auth tokens for backward compatibility)
+            valid_token_types = ['lab', 'auth', 'refresh']
+            if payload.get('token_type') not in valid_token_types:
                 raise jwt.InvalidTokenError('Invalid token type')
             
             # Verify fingerprint

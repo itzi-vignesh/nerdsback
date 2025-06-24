@@ -74,9 +74,13 @@ LAB_TEMPLATES = [
 @require_http_methods(["POST"])
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
 def login_handler(request):
     """Custom login endpoint returning both auth and lab tokens + basic user data."""
-
+    from .frontend_crypto import FrontendCrypto
+    
     username = request.data.get("username")
     password = request.data.get("password")
 
@@ -109,9 +113,52 @@ def login_handler(request):
             user_id=user.id,
             username=user.username,
             email=user.email,
-            role=user.role if hasattr(user, 'role') else None,
+            role=getattr(user, 'role', None),
             token_type='lab'
         )
+        
+        # Prepare user data (non-sensitive)
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+        }
+        
+        # Prepare sensitive data for encryption
+        crypto = FrontendCrypto()
+        sensitive_data = {
+            "auth_token": auth_token.key,
+            "lab_token": lab_token['access_token'],
+            "lab_refresh_token": lab_token['refresh_token'],
+            "user": user_data
+        }
+        
+        # Create session info for additional security
+        session_info = {
+            'session_id': lab_token['token_id'],
+            'ip_address': request.META.get('REMOTE_ADDR', ''),
+            'user_agent': request.META.get('HTTP_USER_AGENT', '')
+        }
+        
+        # Encrypt sensitive data for frontend storage
+        encrypted_tokens = crypto.encrypt_token_data(sensitive_data)
+        session_key = crypto.generate_frontend_session_key(user.id, session_info)
+        
+        return Response({
+            "encrypted_data": encrypted_tokens,
+            "session_key": session_key,
+            "user_public": {  # Non-sensitive data that can be stored unencrypted
+                "id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name
+            }
+        })
+        
     except Exception as e:
         logger.error(f"Failed to generate lab token: {str(e)}")
         return Response(
@@ -174,7 +221,7 @@ def verify_flag(request):
                     'completed_at': timezone.now()
                 }
             )
-            
+
             return Response({
                 "status": "success",
                 "message": "Flag verified successfully",
@@ -339,14 +386,105 @@ def verify_lab_token_view(request):
             )
             
         return Response({
-            'valid': True,
             'user_id': payload['user_id'],
             'username': payload['username'],
-            'lab_id': payload.get('lab_id')
+            'email': payload.get('email'),
+            'is_authenticated': True,
+            'token_id': token,  # Add token_id for lab environment
+            'lab_id': payload.get('lab_id'),
+            'user_data': {
+                'id': payload['user_id'],
+                'username': payload['username'],
+                'email': payload.get('email'),
+            }
         })
     except Exception as e:
         logger.error(f"Error verifying lab token: {str(e)}")
         return Response(
             {"error": "Failed to verify lab token"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        ) 
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_lab_access(request):
+    """
+    Verify if a user has access to a specific lab.
+    """
+    try:
+        user_id = request.data.get('user_id')
+        lab_id = request.data.get('lab_id')
+        
+        if not user_id or not lab_id:
+            return Response(
+                {'error': 'user_id and lab_id are required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from django.contrib.auth.models import User
+            user = User.objects.get(id=user_id)
+            # For now, allow all authenticated users to access labs
+            # You can add more specific lab access logic here
+            return Response({'has_access': True}, status=status.HTTP_200_OK)
+            
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+            
+    except Exception as e:
+        logger.error(f"Lab access verification error: {str(e)}")
+        return Response(
+            {'error': 'Access verification failed'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def decrypt_frontend_data(request):
+    """Decrypt frontend encrypted data for client use."""
+    from .frontend_crypto import FrontendCrypto
+    
+    try:
+        encrypted_data = request.data.get('encrypted_data')
+        session_key = request.data.get('session_key')
+        
+        if not encrypted_data:
+            return Response(
+                {"error": "Encrypted data is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Decrypt the data
+        crypto = FrontendCrypto()
+        decrypted_data = crypto.decrypt_token_data(encrypted_data)
+        
+        if not decrypted_data:
+            return Response(
+                {"error": "Failed to decrypt data"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+            
+        # Verify session key if provided
+        if session_key:
+            session_data = crypto.decrypt_token_data(session_key)
+            if not session_data:
+                logger.warning("Invalid session key provided")
+        
+        # Return only necessary data, keeping sensitive tokens encrypted
+        return Response({
+            "user": decrypted_data.get('user', {}),
+            "tokens_available": True  # Indicate tokens are available but don't expose them
+        })
+        
+    except Exception as e:
+        logger.error(f"Frontend decryption error: {str(e)}")
+        return Response(
+            {"error": "Decryption failed"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

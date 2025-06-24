@@ -8,12 +8,35 @@ from corsheaders.defaults import default_headers
 # Build paths
 BASE_DIR = Path(__file__).resolve().parent
 
-# Load environment variables from .env.production
-env_file = os.path.join(BASE_DIR, '.env.production')
-if not os.path.exists(env_file):
-    raise FileNotFoundError(f"Production environment file not found: {env_file}")
+# Environment file selection with fallback logic
+# Priority: DJANGO_ENV -> .env.production -> .env -> error
+environment = os.getenv('DJANGO_ENV', 'production')
 
-dotenv.load_dotenv(env_file)
+env_files = []
+if environment == 'production':
+    env_files = ['.env.production', '.env']
+elif environment == 'development':
+    env_files = ['.env.development', '.env']
+else:
+    env_files = [f'.env.{environment}', '.env']
+
+env_file_loaded = None
+for env_file in env_files:
+    env_path = os.path.join(BASE_DIR, env_file)
+    if os.path.exists(env_path):
+        dotenv.load_dotenv(env_path)
+        env_file_loaded = env_file
+        print(f"Loaded environment from: {env_file}")
+        break
+
+if not env_file_loaded:
+    available_files = [f for f in ['.env', '.env.production', '.env.development'] 
+                      if os.path.exists(os.path.join(BASE_DIR, f))]
+    raise FileNotFoundError(
+        f"No environment file found for environment '{environment}'. "
+        f"Tried: {', '.join(env_files)}. "
+        f"Available files: {', '.join(available_files) if available_files else 'None'}"
+    )
 
 # Required environment variables
 required_env_vars = [
@@ -48,7 +71,7 @@ if not LAB_SECRET_KEY:
 
 # Token settings
 TOKEN_SETTINGS = {
-    'SECRET_KEY': os.getenv('LAB_SERVICE_TOKEN'),
+    'SECRET_KEY': LAB_SECRET_KEY,  # Use the LAB_SECRET_KEY from environment
     'ALGORITHM': 'HS256',
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -314,9 +337,6 @@ REST_FRAMEWORK = {
 }
 
 # JWT Settings
-JWT_TOKEN_VERSION = '1.0'  # For future token invalidation
-JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-main-backend-jwt-secret-key-here')  # Must match main backend
-
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME'],
     'REFRESH_TOKEN_LIFETIME': TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME'],
@@ -342,6 +362,10 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_LIFETIME': TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME'],
     'SLIDING_TOKEN_REFRESH_LIFETIME': TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME'],
 }
+
+# SMTP Settings for email functionality
+SMTP_MAX_RETRIES = 3
+SMTP_RETRY_DELAY = 2
 
 # Logging
 LOGGING = {
@@ -380,4 +404,4 @@ LOGGING = {
             'propagate': True,
         },
     },
-} 
+}
