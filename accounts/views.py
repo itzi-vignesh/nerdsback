@@ -40,6 +40,7 @@ from nerdslab.email_config import (  # noqa: E501 – local project import
     send_verification_email,
 )
 from nerdslab.token_utils import token_manager
+from nerdslab.frontend_crypto import FrontendCrypto
 
 from .models import EmailVerificationToken, PasswordResetToken, UserProfile
 from .serializers import (  # noqa: E501 – keep grouped
@@ -178,8 +179,7 @@ class LoginView(APIView):
             
             # Generate traditional auth token for backward compatibility
             auth_token, _ = Token.objects.get_or_create(user=user)
-            
-            # Prepare data for encryption
+              # Prepare data for encryption
             crypto = FrontendCrypto()
             sensitive_data = {
                 "access": tokens['access_token'],
@@ -187,24 +187,34 @@ class LoginView(APIView):
                 "auth_token": auth_token.key,
                 "user": UserSerializer(user).data
             }
-              # Encrypt for secure frontend storage
+            
+            # Prepare user public data (also to be encrypted)
+            user_public_data = {
+                "id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "is_active": user.is_active,
+                "is_verified": user.is_active,  # Use is_active as is_verified for now
+                "is_staff": user.is_staff,
+                "is_superuser": user.is_superuser,
+                "date_joined": user.date_joined.isoformat() if user.date_joined else None,
+                "last_login": user.last_login.isoformat() if user.last_login else None
+            }
+            
+            # Encrypt both sensitive data and user public data for secure frontend storage
             encrypted_data = crypto.encrypt_token_data(sensitive_data)
+            encrypted_user_public = crypto.encrypt_token_data(user_public_data)
             
             return Response({
                 "encrypted_data": encrypted_data,
-                "user_public": {  # Non-sensitive data
-                    "id": user.id,
-                    "username": user.username,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "email": user.email,
-                    "is_active": user.is_active,
-                    "is_verified": user.is_active,  # Use is_active as is_verified for now
-                    "is_staff": user.is_staff,
-                    "is_superuser": user.is_superuser,
-                    "date_joined": user.date_joined.isoformat() if user.date_joined else None,
-                    "last_login": user.last_login.isoformat() if user.last_login else None
-                }
+                "encrypted_user_public": encrypted_user_public,
+                "session_key": crypto.generate_frontend_session_key(user.id, {
+                    "session_id": request.session.session_key or "default",
+                    "ip_address": request.META.get('REMOTE_ADDR', ''),
+                    "user_agent": request.META.get('HTTP_USER_AGENT', '')
+                })
             })
             
         except Exception as e:
@@ -687,3 +697,50 @@ class GetCSRFTokenView(APIView):
                 'status': 'error',
                 'message': 'Failed to generate CSRF token'
             }, status=500)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class DecryptUserDataView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    
+    def post(self, request, *args, **kwargs):
+        """
+        Decrypt encrypted user data for frontend use.
+        """
+        try:
+            encrypted_user_data = request.data.get('encrypted_user_data')
+            if not encrypted_user_data:
+                return Response(
+                    {"error": "No encrypted user data provided"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Decrypt the user data
+            crypto = FrontendCrypto()
+            decrypted_data = crypto.decrypt_token_data(encrypted_user_data)
+            
+            if not decrypted_data:
+                return Response(
+                    {"error": "Failed to decrypt user data"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Verify the decrypted data belongs to the authenticated user
+            if decrypted_data.get('id') != request.user.id:
+                return Response(
+                    {"error": "Unauthorized access to user data"}, 
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            return Response({
+                "user_data": decrypted_data,
+                "success": True
+            })
+            
+        except Exception as e:
+            logger.error(f"User data decryption failed: {str(e)}")
+            return Response(
+                {"error": "Decryption failed"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

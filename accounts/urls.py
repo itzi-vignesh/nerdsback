@@ -11,7 +11,8 @@ from .views import (
     ChangePasswordView,
     EmailVerificationView,
     ResendVerificationEmailView,
-    GetCSRFTokenView
+    GetCSRFTokenView,
+    DecryptUserDataView
 )
 
 urlpatterns = [
@@ -28,7 +29,9 @@ urlpatterns = [
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('verify-email/', EmailVerificationView.as_view(), name='verify-email'),
     path('resend-verification/', ResendVerificationEmailView.as_view(), name='resend-verification'),
-    
-    # CSRF token endpoint
+      # CSRF token endpoint
     path('csrf/', GetCSRFTokenView.as_view(), name='get-csrf-token'),
+    
+    # Decrypt user data endpoint
+    path('decrypt-user-data/', DecryptUserDataView.as_view(), name='decrypt-user-data'),
 ]

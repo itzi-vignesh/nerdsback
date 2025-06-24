@@ -34,7 +34,7 @@ LAB_TEMPLATES = [
         "id": "mediconnect-lab",
         "track_id": "track-1",
         "module_id": "module-1",
-        "title": "MediConnect Web Application Security",
+        "name": "MediConnect Web Application Security",
         "description": (
             "Practice web security testing on a medical records management system. "
             "Learn to identify and exploit vulnerabilities in a healthcare application "
@@ -42,16 +42,18 @@ LAB_TEMPLATES = [
         ),
         "difficulty": "medium",
         "category": "Web Security",
-        "estimated_minutes": 90,
+        "duration": 5400,  # 90 minutes in seconds
         "points_awarded": 250,
         "lab_type": "docker",
         "docker_image": "mediconnect_app",
+        "tags": ["web", "security", "healthcare"],
+        "is_locked": False,
     },
     {
         "id": "feedme-lab",
         "track_id": "track-1",
         "module_id": "module-1",
-        "title": "FeedMe Social Media Security",
+        "name": "FeedMe Social Media Security",
         "description": (
             "Explore social media application security by testing a vulnerable social "
             "networking platform. Practice identifying and exploiting common web "
@@ -59,10 +61,12 @@ LAB_TEMPLATES = [
         ),
         "difficulty": "medium",
         "category": "Web Security",
-        "estimated_minutes": 75,
+        "duration": 4500,  # 75 minutes in seconds
         "points_awarded": 200,
         "lab_type": "docker",
         "docker_image": "feedme_app",
+        "tags": ["web", "security", "social-media"],
+        "is_locked": False,
     },
 ]
 
@@ -133,7 +137,9 @@ def verify_flag(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_lab_templates(request):
-    return Response(LAB_TEMPLATES)
+    return Response({
+        "templates": LAB_TEMPLATES
+    })
 
 
 @api_view(["GET"])
