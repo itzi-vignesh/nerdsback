@@ -23,17 +23,17 @@ urlpatterns = [
     path('accounts/', include('accounts.urls')),
     path('health/', views.health_check, name='health_check'),
     path('test/', views.ratelimit_view, name='ratelimit_view'),
-    path('auth/login/', views.login_handler, name='login'),
+    # Removed problematic auth/login/ - use accounts/login/ instead
     path('auth/decrypt/', views.decrypt_frontend_data, name='decrypt_frontend_data'),
     path('labs/token/generate/', views.generate_lab_token_view, name='generate_lab_token'),
     path('labs/token/refresh/', views.refresh_lab_token_view, name='refresh_lab_token'),
     path('labs/token/verify/', views.verify_lab_token_view, name='verify_lab_token'),
-    path('api/verify-lab-access/', views.verify_lab_access, name='verify_lab_access'),  # Add lab access verification
-    path('api/v1/login-handler/', views.login_handler, name='login_handler_v1'),  # Add v1 login handler
+    path('api/verify-lab-access/', views.verify_lab_access, name='verify_lab_access'),
+    # Removed duplicate login handler - use accounts app instead
     path('labs/templates/', views.get_lab_templates, name='lab_templates'),
     path('labs/status/', views.get_lab_status, name='lab_status'),
     path('labs/verify-flag/', views.verify_flag, name='verify_flag'),
-    path('api/test/', views.api_test_endpoint, name='api_test'),  # Test endpoint
+    path('api/test/', views.api_test_endpoint, name='api_test'),
 ]
 
 # Serve static and media files in development
