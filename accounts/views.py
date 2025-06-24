@@ -187,8 +187,7 @@ class LoginView(APIView):
                 "auth_token": auth_token.key,
                 "user": UserSerializer(user).data
             }
-            
-            # Encrypt for secure frontend storage
+              # Encrypt for secure frontend storage
             encrypted_data = crypto.encrypt_token_data(sensitive_data)
             
             return Response({
@@ -198,7 +197,13 @@ class LoginView(APIView):
                     "username": user.username,
                     "first_name": user.first_name,
                     "last_name": user.last_name,
-                    "is_active": user.is_active
+                    "email": user.email,
+                    "is_active": user.is_active,
+                    "is_verified": user.is_active,  # Use is_active as is_verified for now
+                    "is_staff": user.is_staff,
+                    "is_superuser": user.is_superuser,
+                    "date_joined": user.date_joined.isoformat() if user.date_joined else None,
+                    "last_login": user.last_login.isoformat() if user.last_login else None
                 }
             })
             
