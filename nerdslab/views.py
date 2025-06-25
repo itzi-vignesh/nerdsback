@@ -359,13 +359,25 @@ def decrypt_frontend_data(request):
                 status=status.HTTP_401_UNAUTHORIZED
             )
             
+        # Debug: Log the structure of decrypted data (without exposing sensitive content)
+        logger.info(f"🔑 Decrypted data structure: {list(decrypted_data.keys()) if isinstance(decrypted_data, dict) else type(decrypted_data)}")
+        if isinstance(decrypted_data, dict):
+            token_keys = [k for k in decrypted_data.keys() if 'token' in k.lower()]
+            user_keys = [k for k in decrypted_data.keys() if 'user' in k.lower()]
+            logger.info(f"🔑 Token-related keys: {token_keys}")
+            logger.info(f"🔑 User-related keys: {user_keys}")
+            
         # Verify session key if provided
         if session_key:
             session_data = crypto.decrypt_token_data(session_key)
             if not session_data:
                 logger.warning("Invalid session key provided")
         
-        # Return only necessary data, keeping sensitive tokens encrypted
+        # Extract JWT tokens for API authentication
+        access_token = decrypted_data.get('access')  # Frontend stores as 'access'
+        refresh_token = decrypted_data.get('refresh')  # Frontend stores as 'refresh'
+        auth_token = decrypted_data.get('auth_token')  # backward compatibility
+        
         # Check if user data is nested or at root level
         user_data = decrypted_data.get('user')
         if not user_data:
@@ -376,10 +388,27 @@ def decrypt_frontend_data(request):
                 logger.warning("No user data found in decrypted data")
                 user_data = {}
         
-        return Response({
+        # Prepare response with JWT tokens for frontend API authentication
+        response_data = {
             "user": user_data,
-            "tokens_available": True  # Indicate tokens are available but don't expose them
-        })
+            "tokens_available": bool(access_token or refresh_token or auth_token)
+        }
+        
+        # Include JWT tokens if available
+        if access_token:
+            response_data["access"] = access_token
+            logger.info("✅ Extracted access token from decrypted backend data")
+        if refresh_token:
+            response_data["refresh"] = refresh_token
+            logger.info("✅ Extracted refresh token from decrypted backend data")
+        if auth_token:
+            response_data["auth_token"] = auth_token
+            logger.info("✅ Extracted auth token from decrypted backend data (legacy)")
+            
+        # Log token extraction status for debugging
+        logger.info(f"Token extraction: access={bool(access_token)}, refresh={bool(refresh_token)}, auth={bool(auth_token)}")
+        
+        return Response(response_data)
         
     except Exception as e:
         logger.error(f"Frontend decryption error: {str(e)}")
