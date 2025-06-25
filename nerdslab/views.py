@@ -366,8 +366,18 @@ def decrypt_frontend_data(request):
                 logger.warning("Invalid session key provided")
         
         # Return only necessary data, keeping sensitive tokens encrypted
+        # Check if user data is nested or at root level
+        user_data = decrypted_data.get('user')
+        if not user_data:
+            # User data might be at root level (for user_public data)
+            if 'id' in decrypted_data and 'username' in decrypted_data:
+                user_data = decrypted_data
+            else:
+                logger.warning("No user data found in decrypted data")
+                user_data = {}
+        
         return Response({
-            "user": decrypted_data.get('user', {}),
+            "user": user_data,
             "tokens_available": True  # Indicate tokens are available but don't expose them
         })
         
