@@ -324,6 +324,19 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@nerdslab.in')
 EMAIL_USE_SSL = False
 EMAIL_TIMEOUT = 30
 
+# Enhanced SMTP settings for better reliability
+EMAIL_USE_LOCALTIME = True
+EMAIL_FILE_PATH = os.path.join(BASE_DIR, 'emails')  # For debugging emails
+
+# SMTP Settings for email functionality
+SMTP_MAX_RETRIES = 3
+SMTP_RETRY_DELAY = 2
+
+# Email validation
+if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
+    print("⚠️  Warning: EMAIL_HOST_USER or EMAIL_HOST_PASSWORD not set. Email functionality will be disabled.")
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 # REST Framework settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -371,10 +384,6 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_LIFETIME': TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME'],
     'SLIDING_TOKEN_REFRESH_LIFETIME': TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME'],
 }
-
-# SMTP Settings for email functionality
-SMTP_MAX_RETRIES = 3
-SMTP_RETRY_DELAY = 2
 
 # Logging
 LOGGING = {
