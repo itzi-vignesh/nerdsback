@@ -183,7 +183,7 @@ def ratelimit_view(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def generate_lab_token_view(request):
-    """Generate a new lab token."""
+    """Generate a new lab token with modern JWT approach."""
     try:
         logger.info(f"🎟️ Lab token generation request from user: {request.user.id} ({request.user.username})")
         logger.info(f"🎟️ Request data: {request.data}")
@@ -194,41 +194,63 @@ def generate_lab_token_view(request):
             logger.warning(f"❌ Missing lab_id in request from user {request.user.username}")
             return Response({'error': 'lab_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Generate standard JWT tokens with lab-specific claims
+        # Generate modern JWT tokens with lab-specific claims
         from rest_framework_simplejwt.tokens import RefreshToken
+        import uuid
+        from datetime import datetime
+        
+        # Generate unique token IDs for lab context
+        lab_access_token_id = str(uuid.uuid4())
+        lab_refresh_token_id = str(uuid.uuid4())
         
         # Create refresh token with lab-specific claims
         refresh = RefreshToken.for_user(request.user)
         
         # Add lab-specific claims to access token
+        refresh.access_token['jti'] = lab_access_token_id
+        refresh.access_token['token_type'] = 'access'
+        refresh.access_token['context'] = 'lab'
         refresh.access_token['lab_id'] = lab_id
-        refresh.access_token['token_type'] = 'lab'
         refresh.access_token['user_id'] = request.user.id
         refresh.access_token['username'] = request.user.username
         refresh.access_token['email'] = request.user.email
+        refresh.access_token['iat'] = datetime.utcnow().timestamp()
         
         # Add lab-specific claims to refresh token
+        refresh['jti'] = lab_refresh_token_id
+        refresh['token_type'] = 'refresh'
+        refresh['context'] = 'lab'
         refresh['lab_id'] = lab_id
-        refresh['token_type'] = 'lab_refresh'
         refresh['user_id'] = request.user.id
         refresh['username'] = request.user.username
         refresh['email'] = request.user.email
+        refresh['iat'] = datetime.utcnow().timestamp()
         
         access_token = str(refresh.access_token)
         refresh_token = str(refresh)
         
         logger.info(f"✅ Lab token generated successfully for user {request.user.username}, lab {lab_id}")
+        logger.info(f"✅ Lab access token ID: {lab_access_token_id}")
+        logger.info(f"✅ Lab refresh token ID: {lab_refresh_token_id}")
         
         return Response({
             'access_token': access_token,
             'refresh_token': refresh_token,
             'lab_id': lab_id,
-            'user_id': request.user.id
+            'user_id': request.user.id,
+            'token_info': {
+                'access_token_id': lab_access_token_id,
+                'refresh_token_id': lab_refresh_token_id,
+                'context': 'lab',
+                'expires_in': 3600,  # 1 hour for lab tokens
+                'refresh_expires_in': 86400,  # 24 hours
+            }
         })
+        
     except Exception as e:
-        logger.error(f"❌ Error generating lab token: {str(e)}", exc_info=True)
+        logger.error(f"❌ Lab token generation failed: {str(e)}", exc_info=True)
         return Response(
-            {"error": "Failed to generate lab token"},
+            {'error': 'Failed to generate lab token'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

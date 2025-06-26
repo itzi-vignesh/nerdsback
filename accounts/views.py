@@ -119,54 +119,70 @@ class LoginView(APIView):
         if not user.is_active:
             return Response({"error": "Account is inactive. Please verify your email."}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # Generate standard JWT tokens using Django REST Framework JWT
+        # Generate modern JWT tokens with unique claims
         try:
             from rest_framework_simplejwt.tokens import RefreshToken
+            import uuid
+            from datetime import datetime
             
-            # Generate standard JWT tokens
+            # Generate unique token IDs
+            access_token_id = str(uuid.uuid4())
+            refresh_token_id = str(uuid.uuid4())
+            
+            # Create refresh token with unique claims
             refresh = RefreshToken.for_user(user)
+            
+            # Add unique claims to access token
+            refresh.access_token['jti'] = access_token_id
+            refresh.access_token['token_type'] = 'access'
+            refresh.access_token['context'] = 'backend'
+            refresh.access_token['user_id'] = user.id
+            refresh.access_token['username'] = user.username
+            refresh.access_token['email'] = user.email
+            refresh.access_token['iat'] = datetime.utcnow().timestamp()
+            
+            # Add unique claims to refresh token
+            refresh['jti'] = refresh_token_id
+            refresh['token_type'] = 'refresh'
+            refresh['context'] = 'backend'
+            refresh['user_id'] = user.id
+            refresh['username'] = user.username
+            refresh['email'] = user.email
+            refresh['iat'] = datetime.utcnow().timestamp()
+            
             access_token = str(refresh.access_token)
             refresh_token = str(refresh)
             
             # Generate traditional auth token for backward compatibility
             auth_token, _ = Token.objects.get_or_create(user=user)
             
-            # Prepare data for encryption
-            crypto = FrontendCrypto()
-            sensitive_data = {
-                "access": access_token,
-                "refresh": refresh_token,
-                "auth_token": auth_token.key,
-                "user": UserSerializer(user).data
-            }
-            
-            # Prepare user public data (also to be encrypted)
-            user_public_data = {
+            # Prepare user data
+            user_data = {
                 "id": user.id,
                 "username": user.username,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "email": user.email,
                 "is_active": user.is_active,
-                "is_verified": user.is_active,  # Use is_active as is_verified for now
+                "is_verified": user.is_active,
                 "is_staff": user.is_staff,
                 "is_superuser": user.is_superuser,
                 "date_joined": user.date_joined.isoformat() if user.date_joined else None,
                 "last_login": user.last_login.isoformat() if user.last_login else None
             }
             
-            # Encrypt both sensitive data and user public data for secure frontend storage
-            encrypted_data = crypto.encrypt_token_data(sensitive_data)
-            encrypted_user_public = crypto.encrypt_token_data(user_public_data)
-            
+            # Return tokens directly (no encryption needed for JWT)
             return Response({
-                "encrypted_data": encrypted_data,
-                "encrypted_user_public": encrypted_user_public,
-                "session_key": crypto.generate_frontend_session_key(user.id, {
-                    "session_id": request.session.session_key or "default",
-                    "ip_address": request.META.get('REMOTE_ADDR', ''),
-                    "user_agent": request.META.get('HTTP_USER_AGENT', '')
-                })
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "auth_token": auth_token.key,  # For backward compatibility
+                "user": user_data,
+                "token_info": {
+                    "access_token_id": access_token_id,
+                    "refresh_token_id": refresh_token_id,
+                    "expires_in": 300,  # 5 minutes
+                    "refresh_expires_in": 86400,  # 24 hours
+                }
             })
             
         except Exception as e:
