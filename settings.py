@@ -321,26 +321,36 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 EMAIL_USE_SSL = False
-EMAIL_TIMEOUT = 30
+EMAIL_TIMEOUT = 15  # Reduced timeout for faster fallback
 EMAIL_USE_LOCALTIME = True
 EMAIL_FILE_PATH = os.path.join(BASE_DIR, 'emails')  # For debugging emails
 
-# Enhanced email validation
+# Enhanced email validation with better error handling
 if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
     print("⚠️  Warning: EMAIL_HOST_USER or EMAIL_HOST_PASSWORD not set. Email functionality will be disabled.")
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 else:
-    # Test email configuration
+    # Test email configuration with better error handling
     try:
         import smtplib
         from email.mime.text import MIMEText
         
-        # Test SMTP connection
-        server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=10)
+        print(f"🔧 Testing SMTP connection to {EMAIL_HOST}:{EMAIL_PORT}...")
+        
+        # Test SMTP connection with shorter timeout
+        server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=8)
         server.starttls()
         server.login(EMAIL_HOST_USER, EMAIL_HOST_PASSWORD)
         server.quit()
         print("✅ SMTP configuration validated successfully")
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"❌ SMTP authentication failed: {e}")
+        print("🔄 Falling back to console email backend")
+        EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    except smtplib.SMTPConnectError as e:
+        print(f"❌ SMTP connection failed: {e}")
+        print("🔄 Falling back to console email backend")
+        EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
     except Exception as e:
         print(f"❌ SMTP configuration test failed: {e}")
         print("🔄 Falling back to console email backend")
@@ -349,11 +359,6 @@ else:
 # SMTP Settings for email functionality
 SMTP_MAX_RETRIES = 3
 SMTP_RETRY_DELAY = 2
-
-# Email validation
-if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
-    print("⚠️  Warning: EMAIL_HOST_USER or EMAIL_HOST_PASSWORD not set. Email functionality will be disabled.")
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # REST Framework settings
 REST_FRAMEWORK = {
