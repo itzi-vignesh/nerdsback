@@ -1,48 +1,36 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
-import traceback
 import uuid
-import hashlib
 from datetime import timedelta
 from smtplib import SMTPAuthenticationError, SMTPConnectError, SMTPException
 from socket import timeout as SocketTimeout
 from typing import Any, Dict
 
 from django.conf import settings
-from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.contrib.auth import authenticate, logout
 from django.contrib.auth.models import User
-from django.contrib.auth.tokens import default_token_generator
 from django.core.cache import cache
 from django.core.mail import EmailMultiAlternatives, get_connection
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.middleware.csrf import get_token
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import render
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.utils.encoding import force_bytes, force_str
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.html import strip_tags
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.authtoken.models import Token
-from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from nerdslab.email_config import (  # noqa: E501 – local project import
-    send_password_reset_email,
-    send_verification_email,
-)
-from nerdslab.token_utils import token_manager
 from nerdslab.frontend_crypto import FrontendCrypto
 
-from .models import EmailVerificationToken, PasswordResetToken, UserProfile
+from .models import EmailVerificationToken, PasswordResetToken
 from .serializers import (  # noqa: E501 – keep grouped
     EmailVerificationSerializer,
     LoginSerializer,
@@ -53,42 +41,6 @@ from .serializers import (  # noqa: E501 – keep grouped
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ────────────────────────────────────────────────────────────────────────────────
-#  Token Management Functions
-# ────────────────────────────────────────────────────────────────────────────────
-
-def generate_jti():
-    """Generate a unique JWT ID for token identification."""
-    return str(uuid.uuid4())
-
-def generate_token_fingerprint(user):
-    """Generate a unique fingerprint for token security."""
-    base_string = f"{user.id}:{user.username}:{user.email}:{timezone.now().timestamp()}"
-    return hashlib.sha256(base_string.encode()).hexdigest()
-
-def store_fingerprint(user_id, fingerprint):
-    """Store user fingerprint in cache for token validation."""
-    cache_key = f'user_fingerprint_{user_id}'
-    cache.set(cache_key, fingerprint, timeout=settings.TOKEN_SETTINGS['ACCESS_TOKEN_LIFETIME'].total_seconds())
-
-def revoke_token(jti):
-    """Revoke a token by adding its JTI to blacklist."""
-    cache_key = f'revoked_token_{jti}'
-    # Set with long expiration to ensure token stays blacklisted
-    cache.set(cache_key, True, timeout=settings.TOKEN_SETTINGS['REFRESH_TOKEN_LIFETIME'].total_seconds())
-
-def is_token_revoked(jti):
-    """Check if a token is revoked."""
-    cache_key = f'revoked_token_{jti}'
-    return cache.get(cache_key, False)
-
-def validate_token_fingerprint(user_id, fingerprint):
-    """Validate token fingerprint against stored value."""
-    cache_key = f'user_fingerprint_{user_id}'
-    stored_fingerprint = cache.get(cache_key)
-    return stored_fingerprint == fingerprint if stored_fingerprint else False
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -237,23 +189,35 @@ class LogoutView(APIView):
             access_token = request.data.get("access")
             
             if refresh_token:
-                # Revoke the refresh token using our token manager
+                # Revoke the refresh token using Django REST Framework JWT
                 try:
-                    token_manager.revoke_token(refresh_token)
+                    from rest_framework_simplejwt.tokens import RefreshToken
+                    from rest_framework_simplejwt.exceptions import InvalidToken
+                    
+                    # Decode the refresh token to get its JTI
+                    refresh = RefreshToken(refresh_token)
+                    jti = refresh.get('jti')
+                    
+                    if jti:
+                        # Add to blacklist
+                        from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
+                        BlacklistedToken.objects.create(token__jti=jti)
+                        logger.info(f"Successfully blacklisted refresh token with JTI: {jti}")
+                except InvalidToken:
+                    logger.warning("Invalid refresh token provided for logout")
                 except Exception as e:
-                    logger.warning(f"Failed to revoke refresh token: {str(e)}")
+                    logger.warning(f"Failed to blacklist refresh token: {str(e)}")
             
             if access_token:
-                # Revoke the access token using our token manager
+                # For access tokens, we can't blacklist them directly in DRF JWT
+                # but we can log the logout for audit purposes
                 try:
-                    token_manager.revoke_token(access_token)
+                    from rest_framework_simplejwt.tokens import AccessToken
+                    access = AccessToken(access_token)
+                    jti = access.get('jti')
+                    logger.info(f"User logged out, access token JTI: {jti}")
                 except Exception as e:
-                    logger.warning(f"Failed to revoke access token: {str(e)}")
-                
-            # Clear user fingerprint
-            if request.user.id:
-                cache_key = f'user_fingerprint_{request.user.id}'
-                cache.delete(cache_key)
+                    logger.warning(f"Failed to decode access token: {str(e)}")
                 
             # Delete auth token
             try:
@@ -287,7 +251,6 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
 
-    @method_decorator(csrf_exempt)  # method‑only decorator
     def post(self, request, *args, **kwargs):  # noqa: D401 – keep signature
         serializer = PasswordResetRequestSerializer(data=request.data)
         if not serializer.is_valid():
