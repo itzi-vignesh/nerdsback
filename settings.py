@@ -313,20 +313,38 @@ CACHES = {
 # Rate Limiting - using local memory cache
 RATELIMIT_USE_CACHE = 'default'
 
-# Email settings
+# Email Configuration with enhanced error handling
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.zoho.in')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@nerdslab.in')
 EMAIL_USE_SSL = False
 EMAIL_TIMEOUT = 30
-
-# Enhanced SMTP settings for better reliability
 EMAIL_USE_LOCALTIME = True
 EMAIL_FILE_PATH = os.path.join(BASE_DIR, 'emails')  # For debugging emails
+
+# Enhanced email validation
+if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
+    print("⚠️  Warning: EMAIL_HOST_USER or EMAIL_HOST_PASSWORD not set. Email functionality will be disabled.")
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+else:
+    # Test email configuration
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        
+        # Test SMTP connection
+        server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=10)
+        server.starttls()
+        server.login(EMAIL_HOST_USER, EMAIL_HOST_PASSWORD)
+        server.quit()
+        print("✅ SMTP configuration validated successfully")
+    except Exception as e:
+        print(f"❌ SMTP configuration test failed: {e}")
+        print("🔄 Falling back to console email backend")
+        EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # SMTP Settings for email functionality
 SMTP_MAX_RETRIES = 3
