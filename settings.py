@@ -225,8 +225,15 @@ CORS_ALLOWED_ORIGINS = [
     'https://nerd-api.nerdslab.in',
 ]
 
-# Use default headers and add our custom header
-CORS_ALLOW_HEADERS = list(default_headers) + ['x-user-hash']
+# Use default headers and add our custom headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-user-hash',
+    'x-backend-token',
+    'x-encrypted-user',
+    'x-session-key',
+    'x-user-id',
+    'x-username'
+]
 
 # Expose security headers in responses
 CORS_EXPOSE_HEADERS = [
@@ -236,7 +243,9 @@ CORS_EXPOSE_HEADERS = [
     'X-Content-Type-Options',
     'X-Frame-Options',
     'X-XSS-Protection',
-    'Strict-Transport-Security'
+    'Strict-Transport-Security',
+    'x-user-hash',
+    'x-backend-token'
 ]
 
 # CORS methods

@@ -185,21 +185,34 @@ def ratelimit_view(request):
 def generate_lab_token_view(request):
     """Generate a new lab token."""
     try:
+        logger.info(f"🎟️ Lab token generation request from user: {request.user.id} ({request.user.username})")
+        logger.info(f"🎟️ Request data: {request.data}")
+        logger.info(f"🎟️ Request headers: {dict(request.headers)}")
+        
+        lab_id = request.data.get('lab_id')
+        if not lab_id:
+            logger.warning(f"❌ Missing lab_id in request from user {request.user.username}")
+            return Response({'error': 'lab_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
         token = token_manager.generate_token_pair(
             user_id=request.user.id,
             username=request.user.username,
             email=request.user.email,
             role=request.user.role if hasattr(request.user, 'role') else None,
             token_type='lab',
-            lab_id=request.data.get('lab_id')
+            lab_id=lab_id
         )
+        
+        logger.info(f"✅ Lab token generated successfully for user {request.user.username}, lab {lab_id}")
         
         return Response({
             'access_token': token['access_token'],
-            'refresh_token': token['refresh_token']
+            'refresh_token': token['refresh_token'],
+            'lab_id': lab_id,
+            'user_id': request.user.id
         })
     except Exception as e:
-        logger.error(f"Error generating lab token: {str(e)}")
+        logger.error(f"❌ Error generating lab token: {str(e)}", exc_info=True)
         return Response(
             {"error": "Failed to generate lab token"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
