@@ -165,25 +165,25 @@ class LoginView(APIView):
             return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
         if not user.is_active:
-            return Response({"error": "Account is inactive. Please verify your email."}, status=status.HTTP_401_UNAUTHORIZED)        # Generate secure JWT tokens using our custom token manager
+            return Response({"error": "Account is inactive. Please verify your email."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Generate standard JWT tokens using Django REST Framework JWT
         try:
-            from nerdslab.frontend_crypto import FrontendCrypto
+            from rest_framework_simplejwt.tokens import RefreshToken
             
-            tokens = token_manager.generate_token_pair(
-                user_id=user.id,
-                username=user.username,
-                email=user.email,
-                role=getattr(user, 'role', None),
-                token_type='auth'
-            )
+            # Generate standard JWT tokens
+            refresh = RefreshToken.for_user(user)
+            access_token = str(refresh.access_token)
+            refresh_token = str(refresh)
             
             # Generate traditional auth token for backward compatibility
             auth_token, _ = Token.objects.get_or_create(user=user)
-              # Prepare data for encryption
+            
+            # Prepare data for encryption
             crypto = FrontendCrypto()
             sensitive_data = {
-                "access": tokens['access_token'],
-                "refresh": tokens['refresh_token'],
+                "access": access_token,
+                "refresh": refresh_token,
                 "auth_token": auth_token.key,
                 "user": UserSerializer(user).data
             }

@@ -194,20 +194,34 @@ def generate_lab_token_view(request):
             logger.warning(f"❌ Missing lab_id in request from user {request.user.username}")
             return Response({'error': 'lab_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        token = token_manager.generate_token_pair(
-            user_id=request.user.id,
-            username=request.user.username,
-            email=request.user.email,
-            role=request.user.role if hasattr(request.user, 'role') else None,
-            token_type='lab',
-            lab_id=lab_id
-        )
+        # Generate standard JWT tokens with lab-specific claims
+        from rest_framework_simplejwt.tokens import RefreshToken
+        
+        # Create refresh token with lab-specific claims
+        refresh = RefreshToken.for_user(request.user)
+        
+        # Add lab-specific claims to access token
+        refresh.access_token['lab_id'] = lab_id
+        refresh.access_token['token_type'] = 'lab'
+        refresh.access_token['user_id'] = request.user.id
+        refresh.access_token['username'] = request.user.username
+        refresh.access_token['email'] = request.user.email
+        
+        # Add lab-specific claims to refresh token
+        refresh['lab_id'] = lab_id
+        refresh['token_type'] = 'lab_refresh'
+        refresh['user_id'] = request.user.id
+        refresh['username'] = request.user.username
+        refresh['email'] = request.user.email
+        
+        access_token = str(refresh.access_token)
+        refresh_token = str(refresh)
         
         logger.info(f"✅ Lab token generated successfully for user {request.user.username}, lab {lab_id}")
         
         return Response({
-            'access_token': token['access_token'],
-            'refresh_token': token['refresh_token'],
+            'access_token': access_token,
+            'refresh_token': refresh_token,
             'lab_id': lab_id,
             'user_id': request.user.id
         })
@@ -231,28 +245,56 @@ def refresh_lab_token_view(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
             
-        # Verify refresh token
-        payload = token_manager.verify_token(refresh_token)
-        if not payload or payload.get('token_type') != 'refresh':
+        # Verify and decode the refresh token
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from rest_framework_simplejwt.exceptions import InvalidToken
+        
+        try:
+            refresh = RefreshToken(refresh_token)
+            
+            # Check if it's a lab token
+            if refresh.get('token_type') != 'lab_refresh':
+                return Response(
+                    {"error": "Invalid lab refresh token"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Get lab_id from the refresh token
+            lab_id = refresh.get('lab_id')
+            if not lab_id:
+                return Response(
+                    {"error": "Lab ID not found in token"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Generate new token pair with lab-specific claims
+            new_refresh = RefreshToken.for_user(request.user)
+            
+            # Add lab-specific claims to new access token
+            new_refresh.access_token['lab_id'] = lab_id
+            new_refresh.access_token['token_type'] = 'lab'
+            new_refresh.access_token['user_id'] = request.user.id
+            new_refresh.access_token['username'] = request.user.username
+            new_refresh.access_token['email'] = request.user.email
+            
+            # Add lab-specific claims to new refresh token
+            new_refresh['lab_id'] = lab_id
+            new_refresh['token_type'] = 'lab_refresh'
+            new_refresh['user_id'] = request.user.id
+            new_refresh['username'] = request.user.username
+            new_refresh['email'] = request.user.email
+            
+            return Response({
+                'access_token': str(new_refresh.access_token),
+                'refresh_token': str(new_refresh)
+            })
+            
+        except InvalidToken:
             return Response(
                 {"error": "Invalid refresh token"},
                 status=status.HTTP_401_UNAUTHORIZED
             )
             
-        # Generate new token pair
-        token = token_manager.generate_token_pair(
-            user_id=request.user.id,
-            username=request.user.username,
-            email=request.user.email,
-            role=request.user.role if hasattr(request.user, 'role') else None,
-            token_type='lab',
-            lab_id=payload.get('lab_id')
-        )
-        
-        return Response({
-            'access_token': token['access_token'],
-            'refresh_token': token['refresh_token']
-        })
     except Exception as e:
         logger.error(f"Error refreshing lab token: {str(e)}")
         return Response(
@@ -273,33 +315,52 @@ def verify_lab_token_view(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
             
-        # Verify token
-        payload = token_manager.verify_token(
-            token,
-            requested_url=request.data.get('requested_url'),
-            user_agent=request.META.get('HTTP_USER_AGENT'),
-            ip_address=request.META.get('REMOTE_ADDR')
-        )
+        # Verify token using standard JWT
+        from rest_framework_simplejwt.tokens import AccessToken
+        from rest_framework_simplejwt.exceptions import InvalidToken
         
-        if not payload:
+        try:
+            access_token = AccessToken(token)
+            
+            # Check if it's a lab token
+            if access_token.get('token_type') != 'lab':
+                return Response(
+                    {"error": "Invalid lab token"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            # Extract user information from token
+            user_id = access_token.get('user_id')
+            username = access_token.get('username')
+            email = access_token.get('email')
+            lab_id = access_token.get('lab_id')
+            
+            if not all([user_id, username, lab_id]):
+                return Response(
+                    {"error": "Invalid token payload"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            return Response({
+                'user_id': user_id,
+                'username': username,
+                'email': email,
+                'is_authenticated': True,
+                'token_id': access_token.get('jti'),  # JWT ID
+                'lab_id': lab_id,
+                'user_data': {
+                    'id': user_id,
+                    'username': username,
+                    'email': email,
+                }
+            })
+            
+        except InvalidToken:
             return Response(
                 {"error": "Invalid token"},
                 status=status.HTTP_401_UNAUTHORIZED
             )
             
-        return Response({
-            'user_id': payload['user_id'],
-            'username': payload['username'],
-            'email': payload.get('email'),
-            'is_authenticated': True,
-            'token_id': token,  # Add token_id for lab environment
-            'lab_id': payload.get('lab_id'),
-            'user_data': {
-                'id': payload['user_id'],
-                'username': payload['username'],
-                'email': payload.get('email'),
-            }
-        })
     except Exception as e:
         logger.error(f"Error verifying lab token: {str(e)}")
         return Response(
