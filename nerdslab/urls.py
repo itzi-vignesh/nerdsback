@@ -7,6 +7,11 @@ from rest_framework.response import Response
 from django.http import HttpResponse
 from django.conf import settings
 from django.conf.urls.static import static
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+    TokenVerifyView,
+)
 from . import views
 
 @api_view(['GET'])
@@ -21,18 +26,31 @@ def test_view(request):
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('accounts.urls')),
+    
+    # JWT Token endpoints - CRITICAL for token-based authentication
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
+    
+    # Health and test endpoints
     path('health/', views.health_check, name='health_check'),
     path('test/', views.ratelimit_view, name='ratelimit_view'),
-    # Removed problematic auth/login/ - use accounts/login/ instead
+    
+    # Authentication and data endpoints
     path('auth/decrypt/', views.decrypt_frontend_data, name='decrypt_frontend_data'),
+    
+    # Lab token management endpoints
     path('labs/token/generate/', views.generate_lab_token_view, name='generate_lab_token'),
     path('labs/token/refresh/', views.refresh_lab_token_view, name='refresh_lab_token'),
     path('labs/token/verify/', views.verify_lab_token_view, name='verify_lab_token'),
+    
+    # Lab management endpoints
     path('api/verify-lab-access/', views.verify_lab_access, name='verify_lab_access'),
-    # Removed duplicate login handler - use accounts app instead
     path('labs/templates/', views.get_lab_templates, name='lab_templates'),
     path('labs/status/', views.get_lab_status, name='lab_status'),
     path('labs/verify-flag/', views.verify_flag, name='verify_flag'),
+    
+    # API test endpoint
     path('api/test/', views.api_test_endpoint, name='api_test'),
 ]
 
