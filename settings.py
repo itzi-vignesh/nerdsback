@@ -414,23 +414,25 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'format': '[{asctime}] {levelname} {name} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
             'style': '{',
         },
     },
     'handlers': {
         'file': {
             'level': 'INFO',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(LOG_DIR, 'django.log'),  # Use LOG_DIR instead of hardcoded path
-            'maxBytes': 1024 * 1024 * 5,  # 5 MB
-            'backupCount': 5,
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
             'formatter': 'verbose',
         },
         'console': {
-            'level': 'INFO',
+            'level': 'DEBUG',
             'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
+            'formatter': 'simple',
         },
     },
     'loggers': {
@@ -439,10 +441,11 @@ LOGGING = {
             'level': 'INFO',
             'propagate': True,
         },
-        'gunicorn': {
+        # Add your app loggers here if needed
+        'nerdslab': {
             'handlers': ['file', 'console'],
-            'level': 'INFO',
-            'propagate': True,
+            'level': 'DEBUG',
+            'propagate': False,
         },
     },
 }
