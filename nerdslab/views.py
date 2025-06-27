@@ -208,7 +208,7 @@ def generate_lab_token_view(request):
         
         # Add lab-specific claims to access token
         refresh.access_token['jti'] = lab_access_token_id
-        refresh.access_token['token_type'] = 'access'
+        refresh.access_token['token_type'] = 'lab'
         refresh.access_token['context'] = 'lab'
         refresh.access_token['lab_id'] = lab_id
         refresh.access_token['user_id'] = request.user.id
@@ -218,7 +218,7 @@ def generate_lab_token_view(request):
         
         # Add lab-specific claims to refresh token
         refresh['jti'] = lab_refresh_token_id
-        refresh['token_type'] = 'refresh'
+        refresh['token_type'] = 'lab_refresh'
         refresh['context'] = 'lab'
         refresh['lab_id'] = lab_id
         refresh['user_id'] = request.user.id
@@ -295,6 +295,7 @@ def refresh_lab_token_view(request):
             # Add lab-specific claims to new access token
             new_refresh.access_token['lab_id'] = lab_id
             new_refresh.access_token['token_type'] = 'lab'
+            new_refresh.access_token['context'] = 'lab'
             new_refresh.access_token['user_id'] = request.user.id
             new_refresh.access_token['username'] = request.user.username
             new_refresh.access_token['email'] = request.user.email
@@ -302,6 +303,7 @@ def refresh_lab_token_view(request):
             # Add lab-specific claims to new refresh token
             new_refresh['lab_id'] = lab_id
             new_refresh['token_type'] = 'lab_refresh'
+            new_refresh['context'] = 'lab'
             new_refresh['user_id'] = request.user.id
             new_refresh['username'] = request.user.username
             new_refresh['email'] = request.user.email
